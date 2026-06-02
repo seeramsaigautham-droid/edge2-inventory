@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}Boxes{% endblock %}
+{% block content %}
+
+<div class="page-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;">
+  <div>
+    <div class="breadcrumb"><a href="/dashboard">Dashboard</a> / Boxes</div>
+    <h1 class="page-title">Boxes</h1>
+  </div>
+  <a href="/boxes/add" class="btn btn-primary">+ Add Box</a>
+</div>
+
+<!-- Filter bar -->
+<div class="card" style="margin-bottom:16px;">
+  <div class="card-body" style="padding:14px 20px;">
+    <form method="GET" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+      <label style="color:var(--text-muted);font-size:13px;white-space:nowrap;">Filter by Column:</label>
+      <select name="column_id" onchange="this.form.submit()"
+        style="min-width:180px;padding:6px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);">
+        <option value="">All Columns</option>
+        {% for col in columns %}
+        <option value="{{ col.id }}" {% if filter_col == col.id|string %}selected{% endif %}>
+          {{ col.column_name }}
+        </option>
+        {% endfor %}
+      </select>
+      {% if filter_col %}
+      <a href="/boxes" class="btn btn-sm btn-secondary">Clear</a>
+      {% endif %}
+    </form>
+  </div>
+</div>
+
+{% if boxes %}
+<div class="card">
+  <div class="card-body" style="padding:0;">
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Box Name</th>
+            <th>Column</th>
+            <th>Description</th>
+            <th>Items</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for box in boxes %}
+          <tr>
+            <td style="font-weight:600;color:var(--text);">{{ box.box_name }}</td>
+            <td><span class="badge badge-info">{{ box.column_name }}</span></td>
+            <td style="color:var(--text-muted);font-size:13px;">{{ box.description or '—' }}</td>
+            <td><span class="badge badge-muted">{{ box.item_count }} item{{ 's' if box.item_count != 1 else '' }}</span></td>
+            <td>
+              <div style="display:flex;gap:8px;">
+                <a href="/items?box_id={{ box.id }}" class="btn btn-sm btn-secondary">View Items</a>
+                <a href="/boxes/edit/{{ box.id }}" class="btn btn-sm btn-secondary">Edit</a>
+                {% if session.role == 'admin' %}
+                <form id="del-box-{{ box.id }}" method="POST" action="/boxes/delete/{{ box.id }}" style="display:inline;">
+                  <button type="button" class="btn btn-sm btn-danger"
+                    onclick="openConfirm('Delete box &laquo;{{ box.box_name }}&raquo; and ALL its items? This cannot be undone.', 'del-box-{{ box.id }}')">
+                    Delete
+                  </button>
+                </form>
+                {% endif %}
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% else %}
+<div class="empty-state">
+  <div class="empty-icon">📦</div>
+  <div class="empty-title">No boxes found</div>
+  <div class="empty-sub">
+    {% if filter_col %}No boxes in this column yet.{% else %}Add boxes to organise your inventory items.{% endif %}
+  </div>
+  <a href="/boxes/add" class="btn btn-primary" style="margin-top:16px;">+ Add Box</a>
+</div>
+{% endif %}
+
+{% endblock %}

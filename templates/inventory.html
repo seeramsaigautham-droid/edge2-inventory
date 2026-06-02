@@ -1,0 +1,337 @@
+{% extends "base.html" %}
+{% block title %}Inventory — Edge2 Inventory{% endblock %}
+{% block page_title %}Inventory{% endblock %}
+{% block page_meta %}All items across every column and box{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <h2>Inventory</h2>
+    <p style="color:var(--text-muted);font-size:0.875rem;margin-top:4px;">Unified view of all items</p>
+  </div>
+  {% if session.get('role') in ('admin', 'storekeeper') %}
+  <a href="{{ url_for('add_item') }}" class="btn btn-primary">+ Add Item</a>
+  {% endif %}
+</div>
+
+<!-- Summary Stats -->
+<div class="stat-grid">
+  <div class="stat-card">
+    <div class="stat-label">Total Items</div>
+    <div class="stat-value">{{ total_items }}</div>
+    <div class="stat-sub">across all boxes</div>
+  </div>
+  <div class="stat-card" style="border-color:var(--danger);">
+    <div class="stat-label">Out of Stock</div>
+    <div class="stat-value" style="color:var(--danger);">{{ out_of_stock }}</div>
+    <div class="stat-sub">quantity = 0</div>
+  </div>
+  <div class="stat-card" style="border-color:var(--warning);">
+    <div class="stat-label">Low Stock</div>
+    <div class="stat-value" style="color:var(--warning);">{{ low_stock_count }}</div>
+    <div class="stat-sub">at or below min</div>
+  </div>
+  <div class="stat-card" style="border-color:var(--success);">
+    <div class="stat-label">Healthy</div>
+    <div class="stat-value" style="color:var(--success);">{{ healthy_count }}</div>
+    <div class="stat-sub">above min stock</div>
+  </div>
+</div>
+
+<!-- Filter Bar -->
+<div class="card" style="margin-bottom:16px;">
+  <div class="card-body" style="padding:14px 18px;">
+    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;">
+      <div class="form-group" style="margin:0;flex:1;min-width:160px;">
+        <label style="font-size:0.75rem;color:var(--text-muted);margin-bottom:4px;display:block;">Search</label>
+        <input type="text" id="filter-search" placeholder="Item name…" style="width:100%;" oninput="applyFilters()">
+      </div>
+      <div class="form-group" style="margin:0;min-width:140px;">
+        <label style="font-size:0.75rem;color:var(--text-muted);margin-bottom:4px;display:block;">Column</label>
+        <select id="filter-column" onchange="onColumnChange()" style="width:100%;">
+          <option value="">All Columns</option>
+          {% for col in all_columns %}
+          <option value="{{ col.id }}">{{ col.column_name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group" style="margin:0;min-width:140px;">
+        <label style="font-size:0.75rem;color:var(--text-muted);margin-bottom:4px;display:block;">Box</label>
+        <select id="filter-box" onchange="applyFilters()" style="width:100%;">
+          <option value="">All Boxes</option>
+          {% for box in all_boxes %}
+          <option value="{{ box.id }}" data-column="{{ box.column_id }}">{{ box.box_name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group" style="margin:0;min-width:130px;">
+        <label style="font-size:0.75rem;color:var(--text-muted);margin-bottom:4px;display:block;">Status</label>
+        <select id="filter-status" onchange="applyFilters()" style="width:100%;">
+          <option value="">All Status</option>
+          <option value="out">Out of Stock</option>
+          <option value="low">Low Stock</option>
+          <option value="ok">Healthy</option>
+        </select>
+      </div>
+      <button class="btn btn-secondary" onclick="clearFilters()" style="white-space:nowrap;margin-bottom:0;">Clear</button>
+    </div>
+  </div>
+</div>
+
+<!-- Result Count -->
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+  <span style="color:var(--text-muted);font-size:0.85rem;">
+    Showing <strong id="result-count" style="color:var(--text);">{{ total_items }}</strong> item{{ 's' if total_items != 1 else '' }}
+  </span>
+</div>
+
+<!-- Items Table -->
+<div class="card">
+  <div class="table-wrap" id="table-wrap">
+    <table id="inventory-table">
+      <thead>
+        <tr>
+          <th>Item</th>
+          <th>Column › Box</th>
+          <th>Quantity</th>
+          <th>Min Stock</th>
+          <th>Status</th>
+          {% if session.get('role') in ('admin', 'storekeeper') %}
+          <th style="text-align:right;">Actions</th>
+          {% endif %}
+        </tr>
+      </thead>
+      <tbody id="inventory-body">
+        {% for item in items %}
+        {% set status = 'out' if item.quantity == 0 else ('low' if item.quantity <= item.min_stock else 'ok') %}
+        <tr class="inv-row"
+          data-name="{{ item.item_name | lower }}"
+          data-column="{{ item.column_id }}"
+          data-box="{{ item.box_id }}"
+          data-status="{{ status }}"
+          style="{% if status == 'out' %}border-left:3px solid var(--danger){% elif status == 'low' %}border-left:3px solid var(--warning){% endif %}">
+          <td>
+            <div style="font-weight:600;color:var(--text);">{{ item.item_name }}</div>
+            {% if item.description %}
+            <div style="font-size:0.78rem;color:var(--text-muted);margin-top:2px;">{{ item.description }}</div>
+            {% endif %}
+          </td>
+          <td>
+            <a href="{{ url_for('column_detail', column_id=item.column_id) }}" style="color:var(--text-muted);text-decoration:none;">{{ item.column_name }}</a>
+            <span style="color:var(--text-dim);margin:0 4px;">›</span>
+            <a href="{{ url_for('box_detail', box_id=item.box_id) }}" style="color:var(--accent);text-decoration:none;">{{ item.box_name }}</a>
+          </td>
+          <td>
+            {% set qty_color = 'var(--danger)' if item.quantity == 0 else ('var(--warning)' if item.quantity <= item.min_stock else 'var(--text)') %}
+            <span style="font-family:var(--mono);font-weight:700;color:{{ qty_color }};" id="qty-{{ item.id }}">{{ item.quantity }}</span>
+          </td>
+          <td style="color:var(--text-muted);font-family:var(--mono);">{{ item.min_stock }}</td>
+          <td>
+            {% if item.quantity == 0 %}
+              <span class="badge badge-danger" id="badge-{{ item.id }}">Out of Stock</span>
+            {% elif item.quantity <= item.min_stock %}
+              <span class="badge badge-warning" id="badge-{{ item.id }}">Low Stock</span>
+            {% else %}
+              <span class="badge badge-success" id="badge-{{ item.id }}">Healthy</span>
+            {% endif %}
+          </td>
+          {% if session.get('role') in ('admin', 'storekeeper') %}
+          <td style="text-align:right;white-space:nowrap;">
+            <div style="display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap;">
+              <button class="btn btn-success btn-sm"
+                data-item-id="{{ item.id }}"
+                data-item-name="{{ item.item_name | e }}"
+                data-item-qty="{{ item.quantity }}"
+                onclick="openRestock(this)">Restock</button>
+              <a href="{{ url_for('edit_item', item_id=item.id) }}" class="btn btn-secondary btn-sm">Edit</a>
+              {% if session.get('role') == 'admin' %}
+              <form id="del-inv-{{ item.id }}" method="POST" action="{{ url_for('delete_item', item_id=item.id) }}" style="display:inline;">
+                <button type="button" class="btn btn-danger btn-sm"
+                  onclick="openConfirm('Delete &quot;{{ item.item_name | e }}&quot;? This cannot be undone.', 'del-inv-{{ item.id }}')">
+                  Delete
+                </button>
+              </form>
+              {% endif %}
+            </div>
+          </td>
+          {% endif %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div id="empty-state" class="empty-state" style="display:none;">
+    <div class="empty-icon">⊠</div>
+    <div class="empty-title">No items match your filters</div>
+    <div class="empty-sub">Try adjusting your search or filter criteria.</div>
+    <button class="btn btn-secondary" style="margin-top:16px;" onclick="clearFilters()">Clear Filters</button>
+  </div>
+</div>
+
+{% if session.get('role') in ('admin', 'storekeeper') %}
+<!-- Restock Modal -->
+<div id="restock-modal" class="modal-overlay">
+  <div class="modal-box">
+    <div class="modal-title" id="restock-title">Restock Item</div>
+    <p style="color:var(--text-muted);font-size:0.875rem;margin-bottom:16px;">
+      Current stock: <strong id="restock-current" style="color:var(--text);font-family:var(--mono);"></strong>
+    </p>
+    <div class="form-group">
+      <label>Quantity to Add</label>
+      <input type="number" id="restock-qty" min="1" value="1" placeholder="Enter quantity"
+        onkeydown="if(event.key==='Enter') confirmRestock()">
+    </div>
+    <div id="restock-error" class="alert alert-error" style="display:none;"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeRestock()">Cancel</button>
+      <button class="btn btn-success" id="restock-confirm-btn" onclick="confirmRestock()">Confirm Restock</button>
+    </div>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+  /* ── Box options for cascade filter ── */
+  const allBoxOptions = Array.from(document.querySelectorAll('#filter-box option')).map(o => ({
+    value: o.value, text: o.text, col: o.dataset.column || ''
+  }));
+
+  function onColumnChange() {
+    const colId  = document.getElementById('filter-column').value;
+    const boxSel = document.getElementById('filter-box');
+    boxSel.innerHTML = '<option value="">All Boxes</option>';
+    allBoxOptions.forEach(opt => {
+      if (!opt.value) return;
+      if (!colId || opt.col === colId) {
+        const o = document.createElement('option');
+        o.value = opt.value; o.textContent = opt.text; o.dataset.column = opt.col;
+        boxSel.appendChild(o);
+      }
+    });
+    applyFilters();
+  }
+
+  function applyFilters() {
+    const search = document.getElementById('filter-search').value.trim().toLowerCase();
+    const colId  = document.getElementById('filter-column').value;
+    const boxId  = document.getElementById('filter-box').value;
+    const status = document.getElementById('filter-status').value;
+    const rows   = document.querySelectorAll('.inv-row');
+    let visible  = 0;
+
+    rows.forEach(row => {
+      const show = (!search || row.dataset.name.includes(search))
+        && (!colId  || row.dataset.column === colId)
+        && (!boxId  || row.dataset.box    === boxId)
+        && (!status || row.dataset.status === status);
+      row.style.display = show ? '' : 'none';
+      if (show) visible++;
+    });
+
+    document.getElementById('result-count').textContent = visible;
+    document.getElementById('empty-state').style.display  = visible === 0 ? 'flex' : 'none';
+    document.getElementById('table-wrap').style.display   = visible === 0 ? 'none' : '';
+  }
+
+  function clearFilters() {
+    document.getElementById('filter-search').value  = '';
+    document.getElementById('filter-column').value  = '';
+    document.getElementById('filter-status').value  = '';
+    const boxSel = document.getElementById('filter-box');
+    boxSel.innerHTML = '<option value="">All Boxes</option>';
+    allBoxOptions.forEach(opt => {
+      if (!opt.value) return;
+      const o = document.createElement('option');
+      o.value = opt.value; o.textContent = opt.text; o.dataset.column = opt.col;
+      boxSel.appendChild(o);
+    });
+    applyFilters();
+  }
+
+  /* ── Restock Modal ── */
+  let restockItemId = null;
+
+  function openRestock(btn) {
+    restockItemId = btn.dataset.itemId;
+    document.getElementById('restock-title').textContent    = 'Restock — ' + btn.dataset.itemName;
+    document.getElementById('restock-current').textContent  = btn.dataset.itemQty;
+    document.getElementById('restock-qty').value            = 1;
+    document.getElementById('restock-error').style.display  = 'none';
+    document.getElementById('restock-modal').classList.add('open');
+    setTimeout(() => document.getElementById('restock-qty').focus(), 50);
+  }
+
+  function closeRestock() {
+    document.getElementById('restock-modal').classList.remove('open');
+    restockItemId = null;
+  }
+
+  async function confirmRestock() {
+    const qty   = parseInt(document.getElementById('restock-qty').value, 10);
+    const errEl = document.getElementById('restock-error');
+    const btn   = document.getElementById('restock-confirm-btn');
+    errEl.style.display = 'none';
+
+    if (!qty || qty < 1) {
+      errEl.textContent = 'Please enter a quantity of at least 1.';
+      errEl.style.display = 'block';
+      return;
+    }
+
+    setLoading(btn, true, 'Restocking…');
+
+    try {
+      const res  = await fetch('/api/restock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_id: parseInt(restockItemId, 10), quantity: qty })
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        const newQty   = data.new_quantity;
+        const qtyEl    = document.getElementById('qty-' + restockItemId);
+        const badgeEl  = document.getElementById('badge-' + restockItemId);
+        const row      = qtyEl ? qtyEl.closest('tr') : null;
+        const minStock = row ? parseInt(row.querySelector('td:nth-child(4)').textContent, 10) : 0;
+
+        if (qtyEl) {
+          qtyEl.textContent = newQty;
+          const newStatus  = newQty === 0 ? 'out' : (newQty <= minStock ? 'low' : 'ok');
+          const colorMap   = { out: 'var(--danger)', low: 'var(--warning)', ok: 'var(--text)' };
+          qtyEl.style.color = 'var(--success)';
+          setTimeout(() => { qtyEl.style.transition = 'color 0.8s'; qtyEl.style.color = colorMap[newStatus]; }, 600);
+          if (row) row.dataset.status = newStatus;
+        }
+        if (badgeEl) {
+          const newStatus = newQty === 0 ? 'out' : (newQty <= minStock ? 'low' : 'ok');
+          const classMap  = { out: 'badge badge-danger', low: 'badge badge-warning', ok: 'badge badge-success' };
+          const textMap   = { out: 'Out of Stock', low: 'Low Stock', ok: 'Healthy' };
+          badgeEl.className   = classMap[newStatus];
+          badgeEl.textContent = textMap[newStatus];
+        }
+        const restockBtn = document.querySelector('[data-item-id="' + restockItemId + '"]');
+        if (restockBtn) restockBtn.dataset.itemQty = newQty;
+
+        closeRestock();
+        showToast('Restocked successfully.', 'success');
+      } else {
+        errEl.textContent = data.error || 'Restock failed.';
+        errEl.style.display = 'block';
+      }
+    } catch (e) {
+      errEl.textContent = 'Network error. Please try again.';
+      errEl.style.display = 'block';
+    } finally {
+      setLoading(btn, false);
+    }
+  }
+
+  document.getElementById('restock-modal') && document.getElementById('restock-modal').addEventListener('click', function(e) {
+    if (e.target === this) closeRestock();
+  });
+</script>
+{% endblock %}

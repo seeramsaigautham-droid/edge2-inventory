@@ -1,0 +1,247 @@
+{% extends "base.html" %}
+{% block title %}{{ item.item_name }} — Item Detail{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="breadcrumb">
+      <a href="{{ url_for('columns') }}">Columns</a>
+      <span class="sep">›</span>
+      <a href="{{ url_for('column_detail', column_id=item.column_id) }}">{{ item.column_name }}</a>
+      <span class="sep">›</span>
+      <a href="{{ url_for('box_detail', box_id=item.box_id) }}">{{ item.box_name }}</a>
+      <span class="sep">›</span>
+      <span>{{ item.item_name }}</span>
+    </div>
+    <h1 class="page-title">{{ item.item_name }}</h1>
+    <p class="page-sub">{{ item.column_name }} › {{ item.box_name }}</p>
+  </div>
+  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+    {% if session.role in ('admin', 'storekeeper') %}
+      <button class="btn btn-success btn-sm" onclick="openRestockModal()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 109 9"/><polyline points="3 12 3 18 9 18"/></svg>
+        Restock
+      </button>
+      <a href="{{ url_for('edit_item', item_id=item.id) }}" class="btn btn-secondary btn-sm">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+        Edit Item
+      </a>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Item Info Cards -->
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-bottom:24px;">
+  <div class="card" style="padding:16px 20px;">
+    <div class="stat-label">Current Stock</div>
+    <div class="stat-value" style="
+      {% if item.quantity == 0 %}color:var(--danger);
+      {% elif item.quantity <= item.min_stock %}color:var(--warning);
+      {% else %}color:var(--success);{% endif %}
+      font-size:32px;">{{ item.quantity }}</div>
+    <div style="margin-top:4px;">
+      {% if item.quantity == 0 %}
+        <span class="badge badge-danger">Out of Stock</span>
+      {% elif item.quantity <= item.min_stock %}
+        <span class="badge badge-warning">Low Stock</span>
+      {% else %}
+        <span class="badge badge-success">OK</span>
+      {% endif %}
+    </div>
+  </div>
+  <div class="card" style="padding:16px 20px;">
+    <div class="stat-label">Min Stock</div>
+    <div class="stat-value">{{ item.min_stock }}</div>
+    <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Alert threshold</div>
+  </div>
+  <div class="card" style="padding:16px 20px;">
+    <div class="stat-label">Currently Borrowed</div>
+    <div class="stat-value" style="{% if currently_out > 0 %}color:var(--warning);{% endif %}">{{ currently_out }}</div>
+    <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">units out with users</div>
+  </div>
+  <div class="card" style="padding:16px 20px;">
+    <div class="stat-label">Total Taken</div>
+    <div class="stat-value">{{ total_taken }}</div>
+    <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">all time</div>
+  </div>
+  <div class="card" style="padding:16px 20px;">
+    <div class="stat-label">Total Returned</div>
+    <div class="stat-value">{{ total_returned }}</div>
+    <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">all time</div>
+  </div>
+  <div class="card" style="padding:16px 20px;">
+    <div class="stat-label">Total Restocked</div>
+    <div class="stat-value">{{ total_restocked }}</div>
+    <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">all time</div>
+  </div>
+</div>
+
+<!-- Item Details Card -->
+<div class="card" style="margin-bottom:24px;">
+  <div class="card-header">
+    <span class="card-title">Item Details</span>
+  </div>
+  <div class="card-body">
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:20px;">
+      <div>
+        <div class="stat-label" style="font-size:11px;margin-bottom:4px;">Location</div>
+        <div style="font-size:14px;color:var(--text);">
+          <a href="{{ url_for('column_detail', column_id=item.column_id) }}" style="color:var(--accent);text-decoration:none;">{{ item.column_name }}</a>
+          <span style="color:var(--text-muted);"> › </span>
+          <a href="{{ url_for('box_detail', box_id=item.box_id) }}" style="color:var(--accent);text-decoration:none;">{{ item.box_name }}</a>
+        </div>
+      </div>
+      <div>
+        <div class="stat-label" style="font-size:11px;margin-bottom:4px;">Description</div>
+        <div style="font-size:14px;color:var(--text);">{{ item.description or '—' }}</div>
+      </div>
+      <div>
+        <div class="stat-label" style="font-size:11px;margin-bottom:4px;">Item ID</div>
+        <div style="font-size:14px;font-family:var(--mono);color:var(--text-muted);">#{{ item.id }}</div>
+      </div>
+      <div>
+        <div class="stat-label" style="font-size:11px;margin-bottom:4px;">Created</div>
+        <div style="font-size:14px;color:var(--text-muted);">{{ item.created_at[:16].replace('T', ' ') if item.created_at else '—' }}</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Transaction History -->
+<div class="card">
+  <div class="card-header">
+    <span class="card-title">Recent Transactions</span>
+    <span class="badge badge-muted">Last 20</span>
+  </div>
+  <div class="card-body" style="padding:0;">
+    {% if recent_txns %}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>User</th>
+            <th>Type</th>
+            <th>Quantity</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for txn in recent_txns %}
+          <tr>
+            <td style="color:var(--text-muted);font-size:12px;white-space:nowrap;">
+              {{ txn.timestamp[:16].replace('T', ' ') if txn.timestamp else '—' }}
+            </td>
+            <td style="font-weight:500;">{{ txn.user_name }}</td>
+            <td>
+              {% if txn.type == 'take' %}
+                <span class="badge badge-warning">Take</span>
+              {% elif txn.type == 'return' %}
+                <span class="badge badge-success">Return</span>
+              {% elif txn.type == 'restock' %}
+                <span class="badge badge-info">Restock</span>
+              {% else %}
+                <span class="badge badge-muted">{{ txn.type }}</span>
+              {% endif %}
+            </td>
+            <td style="font-weight:700;
+              {% if txn.type == 'take' %}color:var(--warning);
+              {% elif txn.type == 'return' %}color:var(--success);
+              {% elif txn.type == 'restock' %}color:var(--accent);
+              {% endif %}">
+              {% if txn.type == 'take' %}−{% else %}+{% endif %}{{ txn.quantity }}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+      <p>No transactions recorded for this item yet.</p>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Restock Modal -->
+{% if session.role in ('admin', 'storekeeper') %}
+<div id="restockModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:1000;align-items:center;justify-content:center;">
+  <div class="card" style="width:340px;">
+    <div class="card-header" style="justify-content:space-between;align-items:center;">
+      <span class="card-title">Restock — {{ item.item_name }}</span>
+      <button onclick="closeRestockModal()" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:20px;line-height:1;">×</button>
+    </div>
+    <div class="card-body" style="display:flex;flex-direction:column;gap:16px;">
+      <div style="font-size:13px;color:var(--text-muted);">
+        Current stock: <span style="color:var(--text);font-weight:600;">{{ item.quantity }}</span>
+      </div>
+      <div class="form-group">
+        <label for="restockQty">Quantity to Add</label>
+        <input type="number" id="restockQty" min="1" value="1" placeholder="Enter quantity">
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-success" style="flex:1;" onclick="submitRestock()" id="restockSubmitBtn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+          Confirm Restock
+        </button>
+        <button class="btn btn-secondary" onclick="closeRestockModal()">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+{% if session.role in ('admin', 'storekeeper') %}
+function openRestockModal() {
+  document.getElementById('restockQty').value = 1;
+  const modal = document.getElementById('restockModal');
+  modal.style.display = 'flex';
+  setTimeout(() => document.getElementById('restockQty').focus(), 50);
+}
+
+function closeRestockModal() {
+  document.getElementById('restockModal').style.display = 'none';
+}
+
+function submitRestock() {
+  const qty = parseInt(document.getElementById('restockQty').value);
+  if (!qty || qty <= 0) { showToast('Enter a valid quantity', 'error'); return; }
+
+  const btn = document.getElementById('restockSubmitBtn');
+  btn.disabled = true;
+  btn.textContent = 'Restocking…';
+
+  fetch('/api/restock', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ item_id: {{ item.id }}, quantity: qty })
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (data.success) {
+      showToast(`Restocked! New quantity: ${data.new_quantity}`, 'success');
+      setTimeout(() => location.reload(), 1200);
+    } else {
+      showToast(data.error || 'Restock failed', 'error');
+      btn.disabled = false;
+      btn.textContent = 'Confirm Restock';
+    }
+  })
+  .catch(() => {
+    showToast('Network error', 'error');
+    btn.disabled = false;
+    btn.textContent = 'Confirm Restock';
+  });
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeRestockModal();
+  if (e.key === 'Enter' && document.getElementById('restockModal').style.display === 'flex') submitRestock();
+});
+{% endif %}
+</script>
+{% endblock %}

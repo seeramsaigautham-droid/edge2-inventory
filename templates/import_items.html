@@ -1,0 +1,300 @@
+{% extends "base.html" %}
+{% block title %}Import Items{% endblock %}
+{% block content %}
+
+<div class="page-header" style="margin-bottom:24px;">
+    <div class="breadcrumb">
+        <a href="/dashboard">Dashboard</a>
+        <span class="sep">›</span>
+        <a href="/items">Items</a>
+        <span class="sep">›</span>
+        <span>Import CSV</span>
+    </div>
+    <h1 class="page-title">Import Inventory Items</h1>
+</div>
+
+{% if import_done %}
+<!-- ── Success result ── -->
+<div class="card" style="max-width:560px;">
+    <div class="card-body" style="text-align:center;padding:40px 32px;">
+        <div style="font-size:48px;margin-bottom:16px;">✅</div>
+        <h2 style="color:var(--text);margin-bottom:8px;">Import Complete</h2>
+        <p style="color:var(--text-muted);margin-bottom:24px;">Your inventory has been updated successfully.</p>
+        <div class="stat-grid" style="grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:28px;">
+            <div class="stat-card">
+                <div class="stat-value" style="color:var(--success);">{{ imported }}</div>
+                <div class="stat-label">New Items Created</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" style="color:var(--accent);">{{ updated }}</div>
+                <div class="stat-label">Existing Items Updated</div>
+            </div>
+            {% if created_columns > 0 %}
+            <div class="stat-card">
+                <div class="stat-value" style="color:var(--warning);">{{ created_columns }}</div>
+                <div class="stat-label">Columns Auto-Created</div>
+            </div>
+            {% endif %}
+            {% if created_boxes > 0 %}
+            <div class="stat-card">
+                <div class="stat-value" style="color:var(--warning);">{{ created_boxes }}</div>
+                <div class="stat-label">Boxes Auto-Created</div>
+            </div>
+            {% endif %}
+        </div>
+        <div style="display:flex;gap:10px;justify-content:center;">
+            <a href="/items" class="btn btn-primary">View Items</a>
+            <a href="/inventory/import" class="btn btn-secondary">Import Another</a>
+        </div>
+    </div>
+</div>
+
+{% elif preview_ready %}
+<!-- ── Preview step ── -->
+<div style="display:grid;grid-template-columns:1fr;gap:16px;">
+
+    {% if error_rows %}
+    <div class="card">
+        <div class="card-header">
+            <span class="card-title" style="color:var(--danger);">⚠ {{ error_rows|length }} Row{{ 's' if
+                error_rows|length != 1 }} with Errors (will be skipped)</span>
+        </div>
+        <div class="card-body" style="padding:0;">
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Row</th>
+                            <th>Data</th>
+                            <th>Errors</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for err in error_rows %}
+                        <tr style="border-left:3px solid var(--danger);">
+                            <td style="font-family:var(--mono);color:var(--text-muted);">#{{ err.row }}</td>
+                            <td style="font-size:12px;color:var(--text-muted);">
+                                {{ err.data.get('item_name','') or err.data.get('item name','') or '—' }}
+                            </td>
+                            <td>
+                                {% for e in err.errors %}
+                                <span class="badge badge-danger" style="margin:2px;">{{ e }}</span>
+                                {% endfor %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if preview_rows %}
+    <div class="card">
+        <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
+            <span class="card-title">Preview — {{ preview_rows|length }} Valid Row{{ 's' if preview_rows|length != 1
+                }}</span>
+            <span class="badge badge-success">Ready to import</span>
+        </div>
+        <div class="card-body" style="padding:0;">
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Column</th>
+                            <th>Box</th>
+                            <th>Item</th>
+                            <th>Qty</th>
+                            <th>Min Stock</th>
+                            <th>Description</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in preview_rows %}
+                        <tr>
+                            <td style="color:var(--text-muted);font-size:13px;">{{ row.column_name }}</td>
+                            <td style="color:var(--text-muted);font-size:13px;">{{ row.box_name }}</td>
+                            <td style="font-weight:600;">{{ row.item_name }}</td>
+                            <td style="font-family:var(--mono);">{{ row.quantity }}</td>
+                            <td style="font-family:var(--mono);color:var(--text-muted);">{{ row.min_stock }}</td>
+                            <td style="font-size:12px;color:var(--text-muted);">{{ row.description or '—' }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <div style="padding:16px 20px;border-top:1px solid var(--border);display:flex;gap:10px;align-items:center;">
+            <form method="POST" action="/inventory/import">
+                <input type="hidden" name="action" value="confirm">
+                <button type="submit" class="btn btn-primary">
+                    ✅ Confirm Import ({{ preview_rows|length }} item{{ 's' if preview_rows|length != 1 }})
+                </button>
+            </form>
+            <a href="/inventory/import" class="btn btn-secondary">Cancel</a>
+            <span style="color:var(--text-dim);font-size:12px;margin-left:auto;">
+                Existing items with the same name in the same box will be updated, not duplicated.
+            </span>
+        </div>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <div class="empty-state-icon">⚠️</div>
+        <div class="empty-state-title">No valid rows found</div>
+        <div class="empty-state-desc">All rows in the uploaded file had errors. Please fix them and re-upload.</div>
+        <a href="/inventory/import" class="btn btn-secondary" style="margin-top:16px;">Re-upload</a>
+    </div>
+    {% endif %}
+</div>
+
+{% else %}
+<!-- ── Upload form ── -->
+<div style="display:grid;grid-template-columns:1fr 320px;gap:20px;align-items:start;">
+
+    <div class="card">
+        <div class="card-header">
+            <span class="card-title">Upload CSV File</span>
+        </div>
+        <div class="card-body">
+            {% if error %}
+            <div class="alert alert-error" style="margin-bottom:16px;">{{ error }}</div>
+            {% endif %}
+
+            <form method="POST" action="/inventory/import" enctype="multipart/form-data">
+                <input type="hidden" name="action" value="preview">
+                <div class="form-group">
+                    <label>CSV File</label>
+                    <div id="drop-zone" style="border:2px dashed var(--border2);border-radius:var(--radius);
+               padding:32px;text-align:center;cursor:pointer;transition:border-color 0.2s,background 0.2s;"
+                        onclick="document.getElementById('csv-file-input').click()"
+                        ondragover="event.preventDefault();this.style.borderColor='var(--accent)';this.style.background='var(--accent-dim)';"
+                        ondragleave="this.style.borderColor='var(--border2)';this.style.background='';"
+                        ondrop="handleDrop(event)">
+                        <div id="drop-icon" style="font-size:36px;margin-bottom:8px;">📄</div>
+                        <div id="drop-text" style="color:var(--text-muted);font-size:14px;">
+                            Drag & drop a CSV file here, or click to browse
+                        </div>
+                        <div id="drop-filename"
+                            style="display:none;color:var(--accent);font-weight:600;font-size:14px;margin-top:8px;">
+                        </div>
+                    </div>
+                    <input type="file" id="csv-file-input" name="csv_file" accept=".csv" style="display:none;"
+                        onchange="onFileSelected(this)">
+                </div>
+                <button type="submit" class="btn btn-primary" id="upload-btn" disabled style="width:100%;">
+                    Preview Import
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:16px;">
+        <div class="card">
+            <div class="card-header"><span class="card-title">Required Columns</span></div>
+            <div class="card-body" style="padding:12px 16px;">
+                <table style="width:100%;font-size:13px;">
+                    <thead>
+                        <tr>
+                            <th style="padding:4px 8px;color:var(--text-muted);font-weight:500;text-align:left;">Column
+                            </th>
+                            <th style="padding:4px 8px;color:var(--text-muted);font-weight:500;text-align:left;">
+                                Required</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for col, req in
+                        [('column_name','✅'),('box_name','✅'),('item_name','✅'),('quantity','✅'),('min_stock','✅'),('description','optional')]
+                        %}
+                        <tr>
+                            <td style="padding:5px 8px;font-family:var(--mono);color:var(--accent);font-size:12px;">{{
+                                col }}</td>
+                            <td style="padding:5px 8px;">
+                                {% if req == 'optional' %}
+                                <span class="badge badge-muted">optional</span>
+                                {% else %}
+                                <span style="color:var(--success);">{{ req }}</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header"><span class="card-title">Notes</span></div>
+            <div class="card-body" style="padding:12px 16px;">
+                <ul style="list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:8px;">
+                    {% for note in [
+                    ('🔄','Existing items (same name + box) will be updated'),
+                    ('🏗','Missing columns/boxes are created automatically'),
+                    ('⚠️','Rows with errors are skipped — others still import'),
+                    ('📋','A preview is shown before any changes are made')
+                    ] %}
+                    <li style="font-size:13px;color:var(--text-muted);display:flex;gap:8px;">
+                        <span>{{ note[0] }}</span><span>{{ note[1] }}</span>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
+                <span class="card-title">Example CSV</span>
+                <button class="btn btn-sm btn-secondary" onclick="downloadSample()">⬇ Download</button>
+            </div>
+            <div class="card-body" style="padding:10px 14px;">
+                <pre
+                    style="font-size:11px;color:var(--text-muted);overflow-x:auto;margin:0;font-family:var(--mono);line-height:1.6;">column_name,box_name,item_name,quantity,min_stock,description
+Column A,Box 1,Arduino Uno,20,5,Dev board
+Column B,Box 3,Breadboard,10,3,</pre>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<script>
+    function onFileSelected(input) {
+        if (input.files && input.files[0]) {
+            const name = input.files[0].name;
+            document.getElementById('drop-filename').textContent = '📎 ' + name;
+            document.getElementById('drop-filename').style.display = 'block';
+            document.getElementById('drop-text').style.display = 'none';
+            document.getElementById('drop-icon').textContent = '✅';
+            document.getElementById('upload-btn').disabled = false;
+            document.getElementById('drop-zone').style.borderColor = 'var(--success)';
+            document.getElementById('drop-zone').style.background = 'var(--success-dim)';
+        }
+    }
+
+    function handleDrop(event) {
+        event.preventDefault();
+        const dz = document.getElementById('drop-zone');
+        dz.style.borderColor = 'var(--border2)';
+        dz.style.background = '';
+        const files = event.dataTransfer.files;
+        if (files && files[0]) {
+            const input = document.getElementById('csv-file-input');
+            // Assign via DataTransfer
+            const dt = new DataTransfer();
+            dt.items.add(files[0]);
+            input.files = dt.files;
+            onFileSelected(input);
+        }
+    }
+
+    function downloadSample() {
+        const csv = 'column_name,box_name,item_name,quantity,min_stock,description\nColumn A,Box 1,Arduino Uno,20,5,ATmega328P dev board\nColumn B,Box 3,Breadboard,10,3,Solderless breadboard\n';
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'inventory_import_template.csv';
+        a.click();
+    }
+</script>
+
+{% endblock %}

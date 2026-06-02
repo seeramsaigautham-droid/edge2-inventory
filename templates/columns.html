@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% block title %}Columns{% endblock %}
+{% block content %}
+
+<div class="page-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;">
+  <div>
+    <div class="breadcrumb"><a href="/dashboard">Dashboard</a> / Columns</div>
+    <h1 class="page-title">Columns</h1>
+  </div>
+  <a href="/columns/add" class="btn btn-primary">+ Add Column</a>
+</div>
+
+{% if columns %}
+<div class="card">
+  <div class="card-body" style="padding:0;">
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Column Name</th>
+            <th>Boxes</th>
+            <th>QR Status</th>
+            <th>Created</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for col in columns %}
+          <tr>
+            <td style="font-weight:600;color:var(--text);">{{ col.column_name }}</td>
+            <td><span class="badge badge-muted">{{ col.box_count }} box{{ 'es' if col.box_count != 1 else '' }}</span></td>
+            <td>
+              {% if col.qr_code_path %}
+                <span class="badge badge-success">Generated</span>
+              {% else %}
+                <span class="badge badge-muted">Not generated</span>
+              {% endif %}
+            </td>
+            <td style="color:var(--text-muted);font-size:12px;">{{ col.created_at[:10] }}</td>
+            <td>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                <a href="/boxes?column_id={{ col.id }}" class="btn btn-sm btn-secondary">View Boxes</a>
+                <a href="/columns/edit/{{ col.id }}" class="btn btn-sm btn-secondary">Edit</a>
+
+                {% if session.get('role') in ('admin', 'storekeeper') %}
+                  {% if col.qr_code_path %}
+                    <button class="btn btn-sm btn-success" onclick="openQrModal({{ col.id }}, '{{ col.column_name }}')">View QR</button>
+                    <a href="/qr/download/{{ col.id }}" class="btn btn-sm btn-secondary">Download</a>
+                  {% else %}
+                    <button class="btn btn-sm btn-warning" id="gen-btn-{{ col.id }}"
+                      onclick="generateQr({{ col.id }}, this)">Generate QR</button>
+                  {% endif %}
+                {% endif %}
+
+                {% if session.get('role') == 'admin' %}
+                <form id="del-col-{{ col.id }}" method="POST" action="/columns/delete/{{ col.id }}" style="display:inline;">
+                  <button type="button" class="btn btn-sm btn-danger"
+                    onclick="openConfirm('Delete column &quot;{{ col.column_name }}&quot; and ALL its boxes and items? This cannot be undone.', 'del-col-{{ col.id }}')">
+                    Delete
+                  </button>
+                </form>
+                {% endif %}
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% else %}
+<div class="empty-state">
+  <div class="empty-icon">⊟</div>
+  <div class="empty-title">No columns yet</div>
+  <div class="empty-sub">Add a column to start organising your inventory.</div>
+  <a href="/columns/add" class="btn btn-primary" style="margin-top:16px;">+ Add Column</a>
+</div>
+{% endif %}
+
+<!-- QR View Modal -->
+<div id="qrModal" class="modal-overlay">
+  <div class="modal-box" style="text-align:center;">
+    <div class="modal-title" id="qrModalTitle"></div>
+    <div style="margin:16px 0;">
+      <img id="qrModalImg" src="" alt="QR Code"
+        style="max-width:220px;border-radius:var(--radius);border:1px solid var(--border);">
+    </div>
+    <div class="modal-actions" style="justify-content:center;">
+      <a id="qrModalDownload" href="#" class="btn btn-primary btn-sm">⬇ Download</a>
+      <button onclick="closeQrModal()" class="btn btn-secondary btn-sm">Close</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  /* ── QR Modal ── */
+  function openQrModal(colId, colName) {
+    document.getElementById('qrModalTitle').textContent = colName + ' — QR Code';
+    document.getElementById('qrModalImg').src = '/static/qrcodes/column_' + colId + '.png';
+    document.getElementById('qrModalDownload').href = '/qr/download/' + colId;
+    document.getElementById('qrModal').classList.add('open');
+  }
+
+  function closeQrModal() {
+    document.getElementById('qrModal').classList.remove('open');
+  }
+
+  document.getElementById('qrModal').addEventListener('click', function (e) {
+    if (e.target === this) closeQrModal();
+  });
+
+  /* ── Generate QR (inline, no reload) ── */
+  async function generateQr(colId, btn) {
+    setLoading(btn, true, 'Generating...');
+    try {
+      const res = await fetch('/qr/generate/' + colId);
+      const data = await res.json();
+      if (data.qr_path) {
+        showToast('QR code generated!', 'success');
+        setTimeout(() => location.reload(), 700);
+      } else {
+        showToast(data.error || 'Failed to generate QR.', 'error');
+        setLoading(btn, false);
+      }
+    } catch (e) {
+      showToast('Network error.', 'error');
+      setLoading(btn, false);
+    }
+  }
+</script>
+
+{% endblock %}

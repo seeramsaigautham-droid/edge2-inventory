@@ -1,0 +1,316 @@
+{% extends "base.html" %}
+{% block title %}Items{% endblock %}
+{% block content %}
+
+<div class="page-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;">
+  <div>
+    <div class="breadcrumb"><a href="/dashboard">Dashboard</a> / Items</div>
+    <h1 class="page-title">Inventory Items</h1>
+  </div>
+  <div style="display:flex;gap:8px;">
+    <a href="/inventory/export{% if request.query_string %}?{{ request.query_string.decode() }}{% endif %}"
+      class="btn btn-secondary">⬇ Export CSV</a>
+    <a href="/inventory/import" class="btn btn-secondary">⬆ Import CSV</a>
+    <a href="/items/add" class="btn btn-primary">+ Add Item</a>
+  </div>
+</div>
+
+<!-- Filter bar -->
+<div class="card" style="margin-bottom:16px;">
+  <div class="card-body" style="padding:14px 20px;">
+    <form method="GET" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+      <select name="column_id" onchange="this.form.submit()"
+        style="min-width:160px;padding:6px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);">
+        <option value="">All Columns</option>
+        {% for col in columns %}
+        <option value="{{ col.id }}" {% if filter_col==col.id|string %}selected{% endif %}>{{ col.column_name }}</option>
+        {% endfor %}
+      </select>
+      <select name="box_id" onchange="this.form.submit()"
+        style="min-width:160px;padding:6px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);">
+        <option value="">All Boxes</option>
+        {% for box in boxes %}
+        <option value="{{ box.id }}" {% if filter_box==box.id|string %}selected{% endif %}>{{ box.box_name }}</option>
+        {% endfor %}
+      </select>
+      <label style="display:flex;align-items:center;gap:6px;color:var(--text-muted);font-size:13px;cursor:pointer;">
+        <input type="checkbox" name="low_stock" value="1" {% if filter_low %}checked{% endif %}
+          onchange="this.form.submit()" style="accent-color:var(--warning);">
+        Low stock only
+      </label>
+      {% if filter_col or filter_box or filter_low %}
+      <a href="/items" class="btn btn-sm btn-secondary">Clear Filters</a>
+      {% endif %}
+    </form>
+  </div>
+</div>
+
+<!-- Bulk action bar (hidden until items selected) -->
+<div id="bulk-bar" style="display:none;position:sticky;top:16px;z-index:100;margin-bottom:12px;">
+  <div style="background:var(--accent-dim);border:1px solid var(--accent);border-radius:var(--radius);
+              padding:12px 20px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+    <span id="bulk-count" style="color:var(--accent);font-weight:600;font-size:14px;"></span>
+    <div style="display:flex;align-items:center;gap:8px;">
+      <label style="color:var(--text-muted);font-size:13px;">Add qty to each:</label>
+      <input type="number" id="bulk-qty" min="1" value="10"
+        style="width:80px;padding:5px 10px;font-family:var(--mono);font-size:14px;
+               background:var(--surface2);border:1px solid var(--border2);border-radius:var(--radius-sm);color:var(--text);">
+    </div>
+    <button class="btn btn-sm btn-success" onclick="submitBulkRestock()">Bulk Restock</button>
+    <button class="btn btn-sm btn-secondary" onclick="clearSelection()">Deselect All</button>
+    <div id="bulk-error" style="display:none;color:var(--danger);font-size:13px;"></div>
+  </div>
+</div>
+
+{% if items %}
+<div class="card">
+  <div class="card-body" style="padding:0;">
+    <div style="padding:12px 20px 8px;border-bottom:1px solid var(--border);
+                display:flex;align-items:center;gap:10px;">
+      <label style="display:flex;align-items:center;gap:8px;color:var(--text-muted);font-size:13px;cursor:pointer;user-select:none;">
+        <input type="checkbox" id="select-all" onchange="toggleSelectAll(this)"
+          style="accent-color:var(--accent);width:15px;height:15px;">
+        Select all
+      </label>
+      <span id="item-total" style="color:var(--text-dim);font-size:12px;">{{ items|length }} item{{ 's' if items|length != 1 }}</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:36px;"></th>
+            <th>Item</th>
+            <th>Location</th>
+            <th>Qty</th>
+            <th>Min Stock</th>
+            <th>Status</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in items %}
+          <tr id="row-{{ item.id }}"
+            {% if item.quantity == 0 %}style="border-left:3px solid var(--danger);"
+            {% elif item.quantity <= item.min_stock %}style="border-left:3px solid var(--warning);"
+            {% endif %}>
+            <td style="text-align:center;">
+              <input type="checkbox" class="item-checkbox" data-id="{{ item.id }}" onchange="onCheckboxChange()"
+                style="accent-color:var(--accent);width:15px;height:15px;cursor:pointer;">
+            </td>
+            <td>
+              <div style="font-weight:600;color:var(--text);">{{ item.item_name }}</div>
+              {% if item.description %}
+              <div style="font-size:12px;color:var(--text-muted);">{{ item.description }}</div>
+              {% endif %}
+            </td>
+            <td>
+              <span style="color:var(--text-muted);font-size:13px;">
+                {{ item.column_name }} › {{ item.box_name }}
+              </span>
+            </td>
+            <td>
+              <span id="qty-{{ item.id }}"
+                style="font-family:var(--mono);font-size:15px;font-weight:700;
+                color:{% if item.quantity == 0 %}var(--danger){% elif item.quantity <= item.min_stock %}var(--warning){% else %}var(--success){% endif %}">
+                {{ item.quantity }}
+              </span>
+            </td>
+            <td style="color:var(--text-muted);font-family:var(--mono);">{{ item.min_stock }}</td>
+            <td>
+              {% if item.quantity == 0 %}
+                <span class="badge badge-danger">Out of Stock</span>
+              {% elif item.quantity <= item.min_stock %}
+                <span class="badge badge-warning">Low Stock</span>
+              {% else %}
+                <span class="badge badge-success">OK</span>
+              {% endif %}
+            </td>
+            <td>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                <button class="btn btn-sm btn-success"
+                  onclick="openRestockModal({{ item.id }}, '{{ item.item_name }}', {{ item.quantity }})">
+                  Restock
+                </button>
+                <a href="/items/edit/{{ item.id }}" class="btn btn-sm btn-secondary">Edit</a>
+                {% if session.role == 'admin' %}
+                <form id="del-item-{{ item.id }}" method="POST" action="/items/delete/{{ item.id }}" style="display:inline;">
+                  <button type="button" class="btn btn-sm btn-danger"
+                    onclick="openConfirm('Delete &laquo;{{ item.item_name }}&raquo;? This cannot be undone.', 'del-item-{{ item.id }}')">
+                    Delete
+                  </button>
+                </form>
+                {% endif %}
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% else %}
+<div class="empty-state">
+  <div class="empty-icon">🔧</div>
+  <div class="empty-title">No items found</div>
+  <div class="empty-sub">
+    {% if filter_col or filter_box or filter_low %}No items match the current filters.{% else %}Add items to your boxes to build your inventory.{% endif %}
+  </div>
+  <a href="/items/add" class="btn btn-primary" style="margin-top:16px;">+ Add Item</a>
+</div>
+{% endif %}
+
+<!-- Restock Modal -->
+<div id="restock-modal"
+  style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:1000;align-items:center;justify-content:center;">
+  <div class="card" style="width:360px;">
+    <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
+      <span class="card-title">Restock Item</span>
+      <button class="btn btn-sm btn-secondary" onclick="closeRestockModal()">✕</button>
+    </div>
+    <div class="card-body">
+      <p id="restock-item-name" style="font-weight:600;color:var(--text);margin-bottom:4px;"></p>
+      <p id="restock-current-qty" style="color:var(--text-muted);font-size:13px;margin-bottom:16px;"></p>
+      <div class="form-group">
+        <label for="restock-qty">Quantity to Add</label>
+        <input type="number" id="restock-qty" min="1" value="10"
+          style="font-family:var(--mono);font-size:18px;text-align:center;">
+      </div>
+      <div id="restock-error" style="display:none;" class="alert alert-error"></div>
+      <div style="display:flex;gap:10px;margin-top:16px;">
+        <button class="btn btn-success" style="flex:1;" onclick="submitRestock()">Confirm Restock</button>
+        <button class="btn btn-secondary" onclick="closeRestockModal()">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // ─── Single restock modal ─────────────────────────────────────────────────────
+  let activeRestockItemId = null;
+
+  function openRestockModal(itemId, itemName, currentQty) {
+    activeRestockItemId = itemId;
+    document.getElementById('restock-item-name').textContent = itemName;
+    document.getElementById('restock-current-qty').textContent = 'Current quantity: ' + currentQty;
+    document.getElementById('restock-qty').value = 10;
+    document.getElementById('restock-error').style.display = 'none';
+    document.getElementById('restock-modal').style.display = 'flex';
+    document.getElementById('restock-qty').focus();
+  }
+
+  function closeRestockModal() {
+    document.getElementById('restock-modal').style.display = 'none';
+    activeRestockItemId = null;
+  }
+
+  async function submitRestock() {
+    const qty = parseInt(document.getElementById('restock-qty').value);
+    const errEl = document.getElementById('restock-error');
+    errEl.style.display = 'none';
+    if (!qty || qty <= 0) {
+      errEl.textContent = 'Enter a valid quantity.';
+      errEl.style.display = 'block';
+      return;
+    }
+    const btn = document.querySelector('#restock-modal .btn-success');
+    setLoading(btn, true, 'Restocking...');
+    const res = await fetch('/items/restock/' + activeRestockItemId, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'quantity=' + qty
+    });
+    const data = await res.json();
+    setLoading(btn, false);
+    if (data.success) {
+      showToast('Restocked successfully. New qty: ' + data.new_quantity, 'success');
+      closeRestockModal();
+      setTimeout(() => location.reload(), 800);
+    } else {
+      errEl.textContent = data.error || 'Failed to restock.';
+      errEl.style.display = 'block';
+    }
+  }
+
+  document.getElementById('restock-modal').addEventListener('click', function (e) {
+    if (e.target === this) closeRestockModal();
+  });
+
+  // Enter key confirms restock when qty input focused
+  document.getElementById('restock-qty').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') submitRestock();
+  });
+
+  // ─── Bulk selection ───────────────────────────────────────────────────────────
+  function getCheckedIds() {
+    return [...document.querySelectorAll('.item-checkbox:checked')].map(cb => parseInt(cb.dataset.id));
+  }
+
+  function onCheckboxChange() {
+    const checked = getCheckedIds();
+    const bulkBar = document.getElementById('bulk-bar');
+    const bulkCount = document.getElementById('bulk-count');
+    const selectAll = document.getElementById('select-all');
+    const total = document.querySelectorAll('.item-checkbox').length;
+
+    if (checked.length > 0) {
+      bulkBar.style.display = 'block';
+      bulkCount.textContent = checked.length + ' item' + (checked.length !== 1 ? 's' : '') + ' selected';
+    } else {
+      bulkBar.style.display = 'none';
+    }
+    selectAll.indeterminate = checked.length > 0 && checked.length < total;
+    selectAll.checked = checked.length === total && total > 0;
+  }
+
+  function toggleSelectAll(el) {
+    document.querySelectorAll('.item-checkbox').forEach(cb => cb.checked = el.checked);
+    onCheckboxChange();
+  }
+
+  function clearSelection() {
+    document.querySelectorAll('.item-checkbox').forEach(cb => cb.checked = false);
+    document.getElementById('select-all').checked = false;
+    onCheckboxChange();
+  }
+
+  async function submitBulkRestock() {
+    const ids = getCheckedIds();
+    const qty = parseInt(document.getElementById('bulk-qty').value);
+    const errEl = document.getElementById('bulk-error');
+    errEl.style.display = 'none';
+
+    if (ids.length === 0) {
+      errEl.textContent = 'No items selected.';
+      errEl.style.display = 'block';
+      return;
+    }
+    if (!qty || qty <= 0) {
+      errEl.textContent = 'Enter a valid quantity.';
+      errEl.style.display = 'block';
+      return;
+    }
+
+    const btn = document.querySelector('#bulk-bar .btn-success');
+    setLoading(btn, true, 'Restocking...');
+
+    const res = await fetch('/items/bulk-restock', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ item_ids: ids, quantity: qty })
+    });
+    const data = await res.json();
+    setLoading(btn, false, 'Bulk Restock');
+
+    if (data.success) {
+      showToast(data.message, 'success');
+      clearSelection();
+      setTimeout(() => location.reload(), 900);
+    } else {
+      errEl.textContent = data.error || 'Bulk restock failed.';
+      errEl.style.display = 'block';
+    }
+  }
+</script>
+
+{% endblock %}

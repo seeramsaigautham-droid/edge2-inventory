@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% block title %}My History{% endblock %}
+
+{% block content %}
+<div class="page-header" style="margin-bottom:24px">
+    <div>
+        <h1 class="page-title">My Activity History</h1>
+        <p style="color:var(--text-muted);margin:4px 0 0">All your past transactions in one place</p>
+    </div>
+    <a href="{{ url_for('profile') }}" class="btn btn-secondary">← Back to Profile</a>
+</div>
+
+<!-- Stats -->
+<div class="stat-grid" style="margin-bottom:24px">
+    <div class="stat-card">
+        <div class="stat-label">Total Taken</div>
+        <div class="stat-value">{{ stats.total_taken }}</div>
+        <div class="stat-sub">units borrowed</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Total Returned</div>
+        <div class="stat-value">{{ stats.total_returned }}</div>
+        <div class="stat-sub">units returned</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Total Restocked</div>
+        <div class="stat-value">{{ stats.total_restocked }}</div>
+        <div class="stat-sub">units added</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">All Transactions</div>
+        <div class="stat-value">{{ txns | length }}</div>
+        <div class="stat-sub">total records</div>
+    </div>
+</div>
+
+<!-- Filter Bar -->
+<div class="card" style="margin-bottom:20px">
+    <div class="card-body" style="padding:14px 20px">
+        <form method="GET" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+            <label style="color:var(--text-muted);font-size:13px;font-weight:500">Filter by type:</label>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+                <a href="{{ url_for('my_history') }}"
+                    class="btn btn-sm {% if not txn_type %}btn-primary{% else %}btn-secondary{% endif %}">
+                    All
+                </a>
+                <a href="{{ url_for('my_history', type='take') }}"
+                    class="btn btn-sm {% if txn_type == 'take' %}btn-primary{% else %}btn-secondary{% endif %}">
+                    Take
+                </a>
+                <a href="{{ url_for('my_history', type='return') }}"
+                    class="btn btn-sm {% if txn_type == 'return' %}btn-primary{% else %}btn-secondary{% endif %}">
+                    Return
+                </a>
+                {% if session.role in ('admin', 'storekeeper') %}
+                <a href="{{ url_for('my_history', type='restock') }}"
+                    class="btn btn-sm {% if txn_type == 'restock' %}btn-primary{% else %}btn-secondary{% endif %}">
+                    Restock
+                </a>
+                {% endif %}
+            </div>
+            {% if txns %}
+            <span style="color:var(--text-muted);font-size:13px;margin-left:auto">
+                {{ txns | length }} record{% if txns | length != 1 %}s{% endif %}
+            </span>
+            {% endif %}
+        </form>
+    </div>
+</div>
+
+<!-- History Table -->
+<div class="card">
+    <div class="card-body" style="padding:0">
+        {% if txns %}
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Item</th>
+                        <th>Location</th>
+                        <th>Type</th>
+                        <th>Quantity</th>
+                        <th>Date &amp; Time</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for t in txns %}
+                    <tr>
+                        <td><strong>{{ t.item_name }}</strong></td>
+                        <td style="color:var(--text-muted);font-size:13px">
+                            {{ t.column_name }} › {{ t.box_name }}
+                        </td>
+                        <td>
+                            {% if t.type == 'take' %}
+                            <span class="badge badge-warning">Take</span>
+                            {% elif t.type == 'return' %}
+                            <span class="badge badge-success">Return</span>
+                            {% else %}
+                            <span class="badge badge-info">Restock</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <span style="font-family:var(--mono);font-size:13px">
+                                {% if t.type == 'take' %}−{% elif t.type == 'return' %}+{% else %}+{% endif %}{{
+                                t.quantity }}
+                            </span>
+                        </td>
+                        <td style="color:var(--text-muted);font-size:13px;white-space:nowrap">
+                            {{ t.timestamp[:16] }}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <div class="empty-icon">📋</div>
+            <div class="empty-title">No transactions found</div>
+            <div class="empty-sub">
+                {% if txn_type %}
+                No "{{ txn_type }}" transactions on record.
+                <a href="{{ url_for('my_history') }}" style="color:var(--accent)">Clear filter</a>
+                {% else %}
+                You haven't made any transactions yet. Use the scanner to get started.
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

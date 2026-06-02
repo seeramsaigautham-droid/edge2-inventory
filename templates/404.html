@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}404 — Not Found{% endblock %}
+{% block page_title %}Error{% endblock %}
+{% block content %}
+<div class="empty-state" style="padding:80px 24px;">
+  <div class="empty-icon" style="font-size:64px;opacity:0.3;">404</div>
+  <div class="empty-title">Page Not Found</div>
+  <div class="empty-sub">The page you're looking for doesn't exist or has been moved.</div>
+  <a href="{{ url_for('dashboard') }}" class="btn btn-primary" style="margin-top:20px;">← Back to Dashboard</a>
+</div>
+{% endblock %}

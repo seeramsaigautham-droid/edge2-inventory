@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}{{ page }} — Edge2{% endblock %}
+{% block topbar_title %}{{ page }}{% endblock %}
+
+{% block content %}
+<div class="card" style="max-width:500px;margin:0 auto;">
+  <div class="empty-state">
+    <div class="icon">🔧</div>
+    <div class="title">{{ page }}</div>
+    <div class="desc">This module will be fully implemented in Phase {{ phase }}.</div>
+  </div>
+</div>
+{% endblock %}

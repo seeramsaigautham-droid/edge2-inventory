@@ -1,0 +1,253 @@
+{% extends "base.html" %}
+{% block title %}Low Stock — Edge2 Inventory{% endblock %}
+{% block page_title %}Low Stock{% endblock %}
+{% block page_meta %}Items at or below minimum stock level{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="breadcrumb">
+      <a href="{{ url_for('dashboard') }}">Dashboard</a>
+      <span class="sep">›</span>
+      <span>Low Stock</span>
+    </div>
+    <h2>Low Stock Alerts</h2>
+  </div>
+  {% if low_items %}
+  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+    <span class="badge badge-danger" style="font-size:13px;padding:5px 14px;">
+      {{ low_items|length }} item{{ 's' if low_items|length != 1 else '' }} need attention
+    </span>
+    {% if session.get('role') in ('admin', 'storekeeper') %}
+    <button class="btn btn-warning" onclick="openRestockAllModal()">⚡ Restock All Low Items</button>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+
+{% if low_items %}
+<div class="card">
+  <div class="card-body" style="padding:0;">
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Item</th>
+            <th>Location</th>
+            <th>Quantity</th>
+            <th>Min Stock</th>
+            <th>Status</th>
+            {% if session.get('role') in ('admin', 'storekeeper') %}
+            <th>Action</th>
+            {% endif %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in low_items %}
+          <tr style="border-left:3px solid {% if item.quantity == 0 %}var(--danger){% else %}var(--warning){% endif %};">
+            <td>
+              <div style="font-weight:600;">{{ item.item_name }}</div>
+              {% if item.description %}
+              <div style="font-size:12px;color:var(--text-muted);">{{ item.description }}</div>
+              {% endif %}
+            </td>
+            <td style="color:var(--text-muted);font-size:13px;">{{ item.column_name }} › {{ item.box_name }}</td>
+            <td>
+              <span style="font-family:var(--mono);font-size:16px;font-weight:700;color:{% if item.quantity == 0 %}var(--danger){% else %}var(--warning){% endif %};">
+                {{ item.quantity }}
+              </span>
+            </td>
+            <td style="font-family:var(--mono);color:var(--text-muted);">{{ item.min_stock }}</td>
+            <td>
+              {% if item.quantity == 0 %}
+                <span class="badge badge-danger">Out of Stock</span>
+              {% else %}
+                <span class="badge badge-warning">Low Stock</span>
+              {% endif %}
+            </td>
+            {% if session.get('role') in ('admin', 'storekeeper') %}
+            <td>
+              <button class="btn btn-sm btn-success"
+                onclick="openRestockModal({{ item.id }}, '{{ item.item_name | e }}', {{ item.quantity }}, {{ item.min_stock }})">
+                Restock
+              </button>
+            </td>
+            {% endif %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% else %}
+<div class="empty-state">
+  <div class="empty-icon">✅</div>
+  <div class="empty-title">All stock levels are healthy</div>
+  <div class="empty-sub">No items are currently at or below their minimum stock threshold.</div>
+</div>
+{% endif %}
+
+{% if session.get('role') in ('admin', 'storekeeper') %}
+<!-- Single Item Restock Modal -->
+<div id="restock-modal" class="modal-overlay">
+  <div class="modal-box">
+    <div class="modal-title">Restock Item</div>
+    <p id="restock-item-name" style="font-weight:600;color:var(--text);margin-bottom:4px;"></p>
+    <p id="restock-info" style="color:var(--text-muted);font-size:13px;margin-bottom:16px;"></p>
+    <div class="form-group">
+      <label for="restock-qty">Quantity to Add</label>
+      <input type="number" id="restock-qty" min="1" value="10"
+        style="font-family:var(--mono);font-size:18px;text-align:center;"
+        onkeydown="if(event.key==='Enter') submitRestock()">
+    </div>
+    <div id="restock-error" class="alert alert-error" style="display:none;"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeRestockModal()">Cancel</button>
+      <button id="restock-confirm-btn" class="btn btn-success" onclick="submitRestock()">Confirm Restock</button>
+    </div>
+  </div>
+</div>
+
+<!-- Restock All Modal -->
+<div id="restock-all-modal" class="modal-overlay">
+  <div class="modal-box">
+    <div class="modal-title">⚡ Restock All Low Items</div>
+    <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px;">
+      This will add the specified quantity to <strong style="color:var(--text);">every item</strong> currently at or below its minimum stock level.
+    </p>
+    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;margin-bottom:16px;">
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">Items that will be restocked:</div>
+      <div style="font-size:22px;font-weight:700;color:var(--warning);">{{ low_items|length if low_items else 0 }}</div>
+    </div>
+    <div class="form-group">
+      <label for="restock-all-qty">Quantity to Add to Each Item</label>
+      <input type="number" id="restock-all-qty" min="1" value="10"
+        style="font-family:var(--mono);font-size:18px;text-align:center;"
+        onkeydown="if(event.key==='Enter') submitRestockAll()">
+    </div>
+    <div id="restock-all-error" class="alert alert-error" style="display:none;"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeRestockAllModal()">Cancel</button>
+      <button id="restock-all-confirm-btn" class="btn btn-warning" onclick="submitRestockAll()">Restock All</button>
+    </div>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+  let activeItemId = null;
+
+  /* ── Single Restock ── */
+  function openRestockModal(itemId, itemName, currentQty, minStock) {
+    activeItemId = itemId;
+    document.getElementById('restock-item-name').textContent = itemName;
+    document.getElementById('restock-info').textContent = 'Current: ' + currentQty + '  |  Min stock: ' + minStock;
+    document.getElementById('restock-qty').value = Math.max(10, minStock - currentQty + 1);
+    document.getElementById('restock-error').style.display = 'none';
+    document.getElementById('restock-modal').classList.add('open');
+    setTimeout(() => document.getElementById('restock-qty').focus(), 50);
+  }
+
+  function closeRestockModal() {
+    document.getElementById('restock-modal').classList.remove('open');
+    activeItemId = null;
+  }
+
+  async function submitRestock() {
+    const qty   = parseInt(document.getElementById('restock-qty').value);
+    const errEl = document.getElementById('restock-error');
+    const btn   = document.getElementById('restock-confirm-btn');
+    errEl.style.display = 'none';
+
+    if (!qty || qty <= 0) {
+      errEl.textContent = 'Enter a valid quantity.';
+      errEl.style.display = 'block';
+      return;
+    }
+
+    setLoading(btn, true, 'Restocking…');
+
+    try {
+      const res  = await fetch('/api/restock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_id: activeItemId, quantity: qty })
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast('Restocked! New quantity: ' + data.new_quantity, 'success');
+        closeRestockModal();
+        setTimeout(() => location.reload(), 800);
+      } else {
+        errEl.textContent = data.error || 'Restock failed.';
+        errEl.style.display = 'block';
+      }
+    } catch (e) {
+      errEl.textContent = 'Network error. Please try again.';
+      errEl.style.display = 'block';
+    } finally {
+      setLoading(btn, false);
+    }
+  }
+
+  /* ── Restock All ── */
+  function openRestockAllModal() {
+    document.getElementById('restock-all-error').style.display = 'none';
+    document.getElementById('restock-all-qty').value = 10;
+    document.getElementById('restock-all-modal').classList.add('open');
+    setTimeout(() => document.getElementById('restock-all-qty').focus(), 50);
+  }
+
+  function closeRestockAllModal() {
+    document.getElementById('restock-all-modal').classList.remove('open');
+  }
+
+  async function submitRestockAll() {
+    const qty   = parseInt(document.getElementById('restock-all-qty').value);
+    const errEl = document.getElementById('restock-all-error');
+    const btn   = document.getElementById('restock-all-confirm-btn');
+    errEl.style.display = 'none';
+
+    if (!qty || qty <= 0) {
+      errEl.textContent = 'Enter a valid quantity.';
+      errEl.style.display = 'block';
+      return;
+    }
+
+    setLoading(btn, true, 'Restocking…');
+
+    try {
+      const res  = await fetch('/items/restock-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ quantity: qty })
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast(data.message, 'success');
+        closeRestockAllModal();
+        setTimeout(() => location.reload(), 800);
+      } else {
+        errEl.textContent = data.error || 'Restock failed.';
+        errEl.style.display = 'block';
+      }
+    } catch (e) {
+      errEl.textContent = 'Network error. Please try again.';
+      errEl.style.display = 'block';
+    } finally {
+      setLoading(btn, false);
+    }
+  }
+
+  /* Backdrop click closes modals */
+  document.getElementById('restock-modal') && document.getElementById('restock-modal').addEventListener('click', function(e) {
+    if (e.target === this) closeRestockModal();
+  });
+  document.getElementById('restock-all-modal') && document.getElementById('restock-all-modal').addEventListener('click', function(e) {
+    if (e.target === this) closeRestockAllModal();
+  });
+</script>
+{% endblock %}

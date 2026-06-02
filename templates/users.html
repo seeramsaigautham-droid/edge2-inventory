@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}Users — Edge2{% endblock %}
+{% block page_title %}User Management{% endblock %}
+{% block page_meta %}
+<a href="{{ url_for('add_user') }}" class="btn btn-primary btn-sm">+ Add User</a>
+{% endblock %}
+
+{% block content %}
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% for category, message in messages %}
+    <div class="alert alert-{{ 'error' if category == 'danger' else category }}">{{ message }}</div>
+  {% endfor %}
+{% endwith %}
+
+{% if users %}
+<div class="card">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Email</th>
+          <th>Role</th>
+          <th>Created</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for user in users %}
+        <tr class="user-row" style="cursor:pointer;" onclick="window.location='{{ url_for('user_profile', user_id=user.id) }}'">
+          <td>
+            <div style="display:flex;align-items:center;gap:10px;">
+              <div style="width:30px;height:30px;border-radius:50%;background:var(--accent-dim);border:1.5px solid var(--accent);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:var(--accent);flex-shrink:0;">
+                {{ user.name[0].upper() }}
+              </div>
+              <div>
+                <span style="font-weight:600;">{{ user.name }}</span>
+                {% if user.id == session.user_id %}
+                <span class="badge badge-info" style="font-size:9px;margin-left:6px;">You</span>
+                {% endif %}
+              </div>
+            </div>
+          </td>
+          <td style="color:var(--text-muted);font-size:13px;">{{ user.email }}</td>
+          <td>
+            {% if user.role == 'admin' %}
+              <span class="badge badge-info">Admin</span>
+            {% elif user.role == 'storekeeper' %}
+              <span class="badge badge-success">Storekeeper</span>
+            {% else %}
+              <span class="badge badge-warning">Employee</span>
+            {% endif %}
+          </td>
+          <td style="color:var(--text-muted);font-size:12px;">{{ user.created_at[:10] }}</td>
+          <td onclick="event.stopPropagation()">
+            <div style="display:flex;gap:6px;align-items:center;">
+              <a href="{{ url_for('user_profile', user_id=user.id) }}" class="btn btn-secondary btn-sm">View</a>
+              {% if user.id != session.user_id %}
+              <form id="del-user-{{ user.id }}" method="POST" action="{{ url_for('delete_user', user_id=user.id) }}" style="display:inline;">
+                <button type="button" class="btn btn-danger btn-sm"
+                  onclick="openConfirm('Delete user &quot;{{ user.name }}&quot;? This cannot be undone.', 'del-user-{{ user.id }}')">
+                  Delete
+                </button>
+              </form>
+              {% else %}
+              <span style="color:var(--text-dim);font-size:12px;">Current user</span>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<div class="empty-state">
+  <div class="empty-icon">◉</div>
+  <div class="empty-title">No users found</div>
+  <div class="empty-sub">Add the first user to get started.</div>
+</div>
+{% endif %}
+
+<style>
+.user-row:hover td { background: var(--surface2); }
+</style>
+
+{% endblock %}

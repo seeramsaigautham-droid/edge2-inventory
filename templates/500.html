@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}500 — Server Error{% endblock %}
+{% block page_title %}Error{% endblock %}
+{% block content %}
+<div class="empty-state" style="padding:80px 24px;">
+  <div class="empty-icon" style="font-size:64px;opacity:0.3;">500</div>
+  <div class="empty-title">Something Went Wrong</div>
+  <div class="empty-sub">An internal server error occurred. Please try again or contact your administrator.</div>
+  <a href="{{ url_for('dashboard') }}" class="btn btn-primary" style="margin-top:20px;">← Back to Dashboard</a>
+</div>
+{% endblock %}

@@ -1,0 +1,249 @@
+{% extends "base.html" %}
+{% block title %}Analytics — Edge2 Inventory{% endblock %}
+{% block page_title %}Analytics{% endblock %}
+{% block page_meta %}Admin only · All-time data{% endblock %}
+
+{% block content %}
+<div id="analytics-root">
+
+  <!-- Summary Stats -->
+  <div class="stat-grid" id="summary-stats">
+    <div class="stat-card"><div class="stat-label">Total Items</div><div class="stat-value" id="s-items">—</div></div>
+    <div class="stat-card"><div class="stat-label">Total Transactions</div><div class="stat-value" id="s-txns">—</div></div>
+    <div class="stat-card"><div class="stat-label">Active Borrowers</div><div class="stat-value" id="s-borrowed">—</div></div>
+    <div class="stat-card"><div class="stat-label">Active Users (30d)</div><div class="stat-value" id="s-users">—</div></div>
+  </div>
+
+  <!-- Stock Health + Daily Activity -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:20px;">
+
+    <div class="card">
+      <div class="card-header"><span class="card-title">Stock Health</span></div>
+      <div class="card-body">
+        <div class="health-grid" id="health-cards">
+          <div class="health-card out"><div class="h-value" id="h-out">—</div><div class="h-label">Out of Stock</div></div>
+          <div class="health-card low"><div class="h-value" id="h-low">—</div><div class="h-label">Low Stock</div></div>
+          <div class="health-card ok" ><div class="h-value" id="h-ok">—</div><div class="h-label">Healthy</div></div>
+        </div>
+        <div id="health-bar-wrap" style="margin-top:16px;">
+          <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">Distribution</div>
+          <div style="display:flex;height:8px;border-radius:4px;overflow:hidden;gap:2px;" id="health-bar"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><span class="card-title">Daily Activity (Last 30 Days)</span></div>
+      <div class="card-body">
+        <div class="daily-chart" id="daily-chart">
+          <div style="color:var(--text-dim);font-size:12px;align-self:center;">Loading…</div>
+        </div>
+        <div style="display:flex;gap:14px;margin-top:10px;font-size:11.5px;">
+          <span style="color:var(--accent);">■ Takes</span>
+          <span style="color:var(--success);">■ Returns</span>
+          <span style="color:var(--warning);">■ Restocks</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Top Items + Usage by User -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:20px;">
+
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Top Items by Usage</span>
+        <span style="font-size:11.5px;color:var(--text-muted);">All-time takes</span>
+      </div>
+      <div class="card-body">
+        <div class="bar-chart" id="top-items-chart">
+          <div style="color:var(--text-dim);font-size:12px;">Loading…</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Usage by User</span>
+        <span style="font-size:11.5px;color:var(--text-muted);">Total transactions</span>
+      </div>
+      <div class="card-body">
+        <div class="bar-chart" id="user-usage-chart">
+          <div style="color:var(--text-dim);font-size:12px;">Loading…</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Top Borrowers + Daily Table -->
+  <div style="display:grid;grid-template-columns:340px 1fr;gap:18px;">
+
+    <div class="card">
+      <div class="card-header"><span class="card-title">Top Active Borrowers</span></div>
+      <div class="card-body" id="borrowers-list">
+        <div style="color:var(--text-dim);font-size:12px;">Loading…</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Daily Breakdown (Last 30 Days)</span>
+        <a href="{{ url_for('reports') }}" class="btn btn-secondary btn-sm">View Reports →</a>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Date</th><th>Takes</th><th>Returns</th><th>Restocks</th><th>Total</th></tr></thead>
+          <tbody id="daily-table-body">
+            <tr><td colspan="5" style="text-align:center;color:var(--text-dim);">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadAnalytics() {
+  try {
+    const [summaryRes, usageRes, dailyRes] = await Promise.all([
+      fetch('/api/analytics/summary'),
+      fetch('/api/analytics/usage'),
+      fetch('/api/analytics/daily'),
+    ]);
+    const summary = await summaryRes.json();
+    const usage   = await usageRes.json();
+    const daily   = await dailyRes.json();
+
+    renderSummary(summary);
+    renderHealth(summary);
+    renderTopItems(usage.top_items);
+    renderUserUsage(usage.user_usage);
+    renderBorrowers(usage.top_borrowers);
+    renderDailyChart(daily);
+    renderDailyTable(daily);
+  } catch (e) {
+    showToast('Failed to load analytics', 'error');
+  }
+}
+
+function renderSummary(s) {
+  document.getElementById('s-items').textContent   = s.total_items.toLocaleString();
+  document.getElementById('s-txns').textContent    = s.total_txns.toLocaleString();
+  document.getElementById('s-borrowed').textContent = s.total_borrowed.toLocaleString();
+  document.getElementById('s-users').textContent   = s.active_users.toLocaleString();
+}
+
+function renderHealth(s) {
+  document.getElementById('h-out').textContent = s.out_of_stock;
+  document.getElementById('h-low').textContent = s.low_stock;
+  document.getElementById('h-ok').textContent  = s.healthy;
+
+  const total = s.out_of_stock + s.low_stock + s.healthy || 1;
+  const bar = document.getElementById('health-bar');
+  bar.innerHTML = '';
+  const segments = [
+    { val: s.out_of_stock, color: 'var(--danger)' },
+    { val: s.low_stock,    color: 'var(--warning)' },
+    { val: s.healthy,      color: 'var(--success)' },
+  ];
+  segments.forEach(seg => {
+    if (seg.val > 0) {
+      const d = document.createElement('div');
+      d.style.cssText = `flex:${seg.val};background:${seg.color};`;
+      bar.appendChild(d);
+    }
+  });
+}
+
+function renderBarChart(containerId, rows, labelKey, valueKey, colorClass) {
+  const container = document.getElementById(containerId);
+  if (!rows || rows.length === 0) {
+    container.innerHTML = '<div class="empty-state"><div class="empty-sub">No data yet</div></div>';
+    return;
+  }
+  const max = Math.max(...rows.map(r => r[valueKey])) || 1;
+  container.innerHTML = rows.map(r => `
+    <div class="bar-row">
+      <div class="bar-label" title="${r[labelKey]}">${r[labelKey]}</div>
+      <div class="bar-track">
+        <div class="bar-fill ${colorClass || ''}" style="width:${(r[valueKey]/max*100).toFixed(1)}%"></div>
+      </div>
+      <div class="bar-value">${r[valueKey]}</div>
+    </div>
+  `).join('');
+}
+
+function renderTopItems(items) {
+  renderBarChart('top-items-chart', items, 'item_name', 'take_count', '');
+}
+
+function renderUserUsage(users) {
+  renderBarChart('user-usage-chart', users, 'name', 'txn_count', 'warning');
+}
+
+function renderBorrowers(borrowers) {
+  const el = document.getElementById('borrowers-list');
+  if (!borrowers || borrowers.length === 0) {
+    el.innerHTML = '<div class="empty-state"><div class="empty-sub">No active borrowings</div></div>';
+    return;
+  }
+  el.innerHTML = borrowers.map((b, i) => `
+    <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);">
+      <div style="width:22px;height:22px;border-radius:50%;background:var(--accent-dim);color:var(--accent);font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;">${i+1}</div>
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:13.5px;font-weight:500;">${b.name}</div>
+        <div style="font-size:11.5px;color:var(--text-muted);">${b.item_count} item type${b.item_count !== 1 ? 's' : ''}</div>
+      </div>
+      <div style="font-size:15px;font-weight:700;font-family:var(--mono);color:var(--warning);">${b.total_borrowed}</div>
+    </div>
+  `).join('') + '<div style="font-size:11px;color:var(--text-dim);margin-top:8px;">units currently out</div>';
+}
+
+function renderDailyChart(days) {
+  const el = document.getElementById('daily-chart');
+  if (!days || days.length === 0) {
+    el.innerHTML = '<div style="color:var(--text-dim);font-size:12px;align-self:center;">No transactions in last 30 days</div>';
+    return;
+  }
+  const max = Math.max(...days.map(d => d.total)) || 1;
+  el.innerHTML = days.map(d => {
+    const h = Math.max(4, Math.round((d.total / max) * 56));
+    return `<div class="daily-bar" style="height:${h}px;" title="${d.day}: ${d.total} total (${d.takes} takes, ${d.returns} returns, ${d.restocks} restocks)"></div>`;
+  }).join('');
+
+  // Color bars by dominant type
+  const bars = el.querySelectorAll('.daily-bar');
+  days.forEach((d, i) => {
+    const dom = Math.max(d.takes, d.returns, d.restocks);
+    if (dom === d.takes)    bars[i].style.background = 'var(--accent-dim)';
+    if (dom === d.returns)  bars[i].style.background = 'var(--success-dim)';
+    if (dom === d.restocks) bars[i].style.background = 'var(--warning-dim)';
+  });
+}
+
+function renderDailyTable(days) {
+  const tbody = document.getElementById('daily-table-body');
+  if (!days || days.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-dim);padding:24px;">No data</td></tr>';
+    return;
+  }
+  tbody.innerHTML = [...days].reverse().map(d => `
+    <tr>
+      <td class="mono" style="color:var(--text-muted);">${d.day}</td>
+      <td><span class="badge badge-info">${d.takes}</span></td>
+      <td><span class="badge badge-success">${d.returns}</span></td>
+      <td><span class="badge badge-warning">${d.restocks}</span></td>
+      <td style="font-weight:600;">${d.total}</td>
+    </tr>
+  `).join('');
+}
+
+loadAnalytics();
+</script>
+{% endblock %}

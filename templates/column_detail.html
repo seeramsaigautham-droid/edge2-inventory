@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+{% block title %}{{ column.column_name }} — Column Detail{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="breadcrumb">
+      <a href="{{ url_for('columns') }}">Columns</a>
+      <span class="sep">›</span>
+      <span>{{ column.column_name }}</span>
+    </div>
+    <h1 class="page-title">{{ column.column_name }}</h1>
+    <p class="page-sub">{{ boxes | length }} box{{ 'es' if boxes | length != 1 else '' }} in this column</p>
+  </div>
+  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+    {% if session.role in ('admin', 'storekeeper') %}
+      {% if column.qr_code_path %}
+        <button class="btn btn-secondary btn-sm" onclick="openQrModal()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M14 14h3v3M17 14v3h3M14 17h3"/></svg>
+          View QR
+        </button>
+        <a href="{{ url_for('download_column_qr', column_id=column.id) }}" class="btn btn-secondary btn-sm">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Download QR
+        </a>
+      {% else %}
+        <button class="btn btn-secondary btn-sm" id="genQrBtn" onclick="generateQr({{ column.id }})">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M14 14h3v3M17 14v3h3M14 17h3"/></svg>
+          Generate QR
+        </button>
+      {% endif %}
+      <a href="{{ url_for('edit_column', column_id=column.id) }}" class="btn btn-secondary btn-sm">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+        Edit Column
+      </a>
+      <a href="{{ url_for('add_box') }}?column_id={{ column.id }}" class="btn btn-primary btn-sm">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Add Box
+      </a>
+    {% endif %}
+  </div>
+</div>
+
+<!-- QR Status Banner -->
+<div style="display:flex;gap:12px;margin-bottom:24px;flex-wrap:wrap;">
+  <div class="card" style="flex:1;min-width:180px;padding:16px 20px;">
+    <div class="stat-label">QR Code</div>
+    <div style="margin-top:6px;">
+      {% if column.qr_code_path %}
+        <span class="badge badge-success">Generated</span>
+      {% else %}
+        <span class="badge badge-muted">Not Generated</span>
+      {% endif %}
+    </div>
+  </div>
+  <div class="card" style="flex:1;min-width:180px;padding:16px 20px;">
+    <div class="stat-label">QR Encodes</div>
+    <div style="margin-top:6px;font-family:var(--mono);font-size:13px;color:var(--accent);">COLUMN:{{ column.id }}</div>
+  </div>
+  <div class="card" style="flex:1;min-width:180px;padding:16px 20px;">
+    <div class="stat-label">Created</div>
+    <div style="margin-top:6px;font-size:13px;color:var(--text-muted);">{{ column.created_at[:10] if column.created_at else '—' }}</div>
+  </div>
+</div>
+
+<!-- Boxes Grid -->
+{% if boxes %}
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;">
+    {% for box in boxes %}
+    <div class="card" style="display:flex;flex-direction:column;gap:0;">
+      <div class="card-header" style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
+        <div>
+          <div class="card-title" style="font-size:15px;">{{ box.box_name }}</div>
+          {% if box.description %}
+            <div style="font-size:12px;color:var(--text-muted);margin-top:3px;">{{ box.description }}</div>
+          {% endif %}
+        </div>
+        <div style="display:flex;gap:6px;flex-shrink:0;">
+          {% if box.low_stock_count and box.low_stock_count > 0 %}
+            <span class="badge badge-warning">{{ box.low_stock_count }} low</span>
+          {% endif %}
+        </div>
+      </div>
+      <div class="card-body" style="display:flex;align-items:center;justify-content:space-between;">
+        <div style="display:flex;gap:20px;">
+          <div>
+            <div class="stat-label" style="font-size:11px;">Items</div>
+            <div style="font-size:20px;font-weight:700;color:var(--text);">{{ box.item_count or 0 }}</div>
+          </div>
+          {% if box.low_stock_count and box.low_stock_count > 0 %}
+          <div>
+            <div class="stat-label" style="font-size:11px;">Low Stock</div>
+            <div style="font-size:20px;font-weight:700;color:var(--warning);">{{ box.low_stock_count }}</div>
+          </div>
+          {% endif %}
+        </div>
+        <div style="display:flex;gap:8px;">
+          {% if session.role in ('admin', 'storekeeper') %}
+            <a href="{{ url_for('edit_box', box_id=box.id) }}" class="btn btn-secondary btn-sm" title="Edit Box">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            </a>
+          {% endif %}
+          <a href="{{ url_for('box_detail', box_id=box.id) }}" class="btn btn-primary btn-sm">
+            View Items
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+          </a>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+{% else %}
+  <div class="empty-state">
+    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
+    <p>No boxes in this column yet.</p>
+    {% if session.role in ('admin', 'storekeeper') %}
+      <a href="{{ url_for('add_box') }}?column_id={{ column.id }}" class="btn btn-primary btn-sm">Add First Box</a>
+    {% endif %}
+  </div>
+{% endif %}
+
+<!-- QR Modal -->
+{% if column.qr_code_path %}
+<div id="qrModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:1000;display:none;align-items:center;justify-content:center;">
+  <div class="card" style="width:320px;text-align:center;">
+    <div class="card-header" style="justify-content:space-between;align-items:center;">
+      <span class="card-title">{{ column.column_name }} — QR Code</span>
+      <button onclick="closeQrModal()" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:20px;line-height:1;">×</button>
+    </div>
+    <div class="card-body" style="display:flex;flex-direction:column;align-items:center;gap:16px;">
+      <img src="{{ url_for('static', filename=column.qr_code_path) }}" alt="QR Code" style="width:200px;height:200px;border-radius:var(--radius-sm);background:#fff;padding:8px;">
+      <div style="font-family:var(--mono);font-size:13px;color:var(--accent);">COLUMN:{{ column.id }}</div>
+      <a href="{{ url_for('download_column_qr', column_id=column.id) }}" class="btn btn-primary btn-sm" style="width:100%;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Download PNG
+      </a>
+    </div>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+function openQrModal() {
+  document.getElementById('qrModal').style.display = 'flex';
+}
+function closeQrModal() {
+  document.getElementById('qrModal').style.display = 'none';
+}
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeQrModal();
+});
+
+function generateQr(colId) {
+  const btn = document.getElementById('genQrBtn');
+  btn.disabled = true;
+  btn.textContent = 'Generating…';
+  fetch(`/qr/generate/${colId}`)
+    .then(r => r.json())
+    .then(data => {
+      if (data.success) {
+        showToast('QR code generated! Reloading…', 'success');
+        setTimeout(() => location.reload(), 1200);
+      } else {
+        showToast(data.error || 'Failed to generate QR', 'error');
+        btn.disabled = false;
+        btn.textContent = 'Generate QR';
+      }
+    })
+    .catch(() => {
+      showToast('Network error', 'error');
+      btn.disabled = false;
+      btn.textContent = 'Generate QR';
+    });
+}
+</script>
+{% endblock %}

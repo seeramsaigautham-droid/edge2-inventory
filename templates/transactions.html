@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% block title %}Transactions — Edge2 Inventory{% endblock %}
+{% block page_title %}Transactions{% endblock %}
+{% block page_meta %}Last 200 records{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h2>Transaction Log</h2>
+  <a href="{{ url_for('reports') }}" class="btn btn-secondary">Advanced Reports →</a>
+</div>
+
+<!-- Client-side filter bar -->
+<div class="card" style="margin-bottom:16px;">
+  <div class="card-body" style="padding:12px 16px;">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+      <div class="search-bar" style="flex:1;min-width:200px;">
+        <span style="color:var(--text-dim);">⌕</span>
+        <input type="text" id="searchInput" placeholder="Search item name, user, location…" oninput="filterTable()"/>
+      </div>
+      <select id="typeFilter" onchange="filterTable()" style="width:auto;min-width:130px;">
+        <option value="">All Types</option>
+        <option value="take">Take</option>
+        <option value="return">Return</option>
+        <option value="restock">Restock</option>
+      </select>
+      <button class="btn btn-secondary btn-sm" onclick="clearFilters()">Clear</button>
+      <span id="result-count" style="font-size:12.5px;color:var(--text-muted);white-space:nowrap;"></span>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  {% if txns %}
+  <div class="table-wrap">
+    <table id="txn-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>User</th>
+          <th>Item</th>
+          <th>Location</th>
+          <th>Type</th>
+          <th>Qty</th>
+          <th>Timestamp</th>
+        </tr>
+      </thead>
+      <tbody id="txn-body">
+        {% for t in txns %}
+        <tr data-search="{{ (t.user_name ~ ' ' ~ t.item_name ~ ' ' ~ t.box_name ~ ' ' ~ t.column_name)|lower }}"
+            data-type="{{ t.type }}">
+          <td class="mono" style="color:var(--text-dim);">{{ t.id }}</td>
+          <td style="font-weight:500;">{{ t.user_name }}</td>
+          <td>{{ t.item_name }}</td>
+          <td style="color:var(--text-muted);font-size:12.5px;">{{ t.column_name }} › {{ t.box_name }}</td>
+          <td>
+            {% if t.type == 'take' %}
+              <span class="badge badge-info">take</span>
+            {% elif t.type == 'return' %}
+              <span class="badge badge-success">return</span>
+            {% else %}
+              <span class="badge badge-warning">restock</span>
+            {% endif %}
+          </td>
+          <td class="mono">{{ t.quantity }}</td>
+          <td class="mono" style="color:var(--text-muted);font-size:12px;">{{ t.timestamp }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state">
+    <div class="empty-icon">📋</div>
+    <div class="empty-title">No transactions yet</div>
+    <div class="empty-sub">Transactions will appear here after items are taken or returned.</div>
+  </div>
+  {% endif %}
+</div>
+
+<!-- Empty filter state -->
+<div id="no-filter-results" style="display:none;" class="card">
+  <div class="empty-state">
+    <div class="empty-icon">🔍</div>
+    <div class="empty-title">No matching transactions</div>
+    <div class="empty-sub">Try a different search or filter.</div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const totalRows = document.querySelectorAll('#txn-body tr').length;
+updateCount(totalRows);
+
+function filterTable() {
+  const search = document.getElementById('searchInput').value.toLowerCase().trim();
+  const type   = document.getElementById('typeFilter').value;
+  const rows   = document.querySelectorAll('#txn-body tr');
+  let visible  = 0;
+
+  rows.forEach(row => {
+    const matchSearch = !search || row.dataset.search.includes(search);
+    const matchType   = !type   || row.dataset.type === type;
+    const show = matchSearch && matchType;
+    row.style.display = show ? '' : 'none';
+    if (show) visible++;
+  });
+
+  updateCount(visible);
+
+  const table = document.getElementById('txn-table');
+  const noRes = document.getElementById('no-filter-results');
+  if (visible === 0 && totalRows > 0) {
+    table.closest('.card').style.display = 'none';
+    noRes.style.display = '';
+  } else {
+    table.closest('.card').style.display = '';
+    noRes.style.display = 'none';
+  }
+}
+
+function updateCount(n) {
+  document.getElementById('result-count').textContent = `${n} record${n !== 1 ? 's' : ''}`;
+}
+
+function clearFilters() {
+  document.getElementById('searchInput').value = '';
+  document.getElementById('typeFilter').value  = '';
+  filterTable();
+}
+
+// Init count
+filterTable();
+</script>
+{% endblock %}

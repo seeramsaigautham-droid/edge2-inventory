@@ -1,0 +1,329 @@
+{% extends "base.html" %}
+{% block title %}My Profile{% endblock %}
+
+{% block content %}
+<div class="page-header" style="margin-bottom:24px">
+    <div>
+        <h1 class="page-title">My Profile</h1>
+        <p style="color:var(--text-muted);margin:4px 0 0">Manage your account settings and view your activity</p>
+    </div>
+</div>
+
+{% if success %}
+<div class="alert alert-success" style="margin-bottom:20px">{{ success }}</div>
+{% endif %}
+{% if error %}
+<div class="alert alert-error" style="margin-bottom:20px">{{ error }}</div>
+{% endif %}
+
+<!-- Stats Row -->
+<div class="stat-grid" style="margin-bottom:24px">
+    <div class="stat-card">
+        <div class="stat-label">Total Taken</div>
+        <div class="stat-value">{{ total_taken }}</div>
+        <div class="stat-sub">units borrowed all time</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Total Returned</div>
+        <div class="stat-value">{{ total_returned }}</div>
+        <div class="stat-sub">units returned all time</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Currently Holding</div>
+        {% if currently_borrowed > 0 %}
+        <div class="stat-value" id="holdingValue" style="color:var(--warning)">
+            {{ currently_borrowed }}
+        </div>
+        {% else %}
+        <div class="stat-value" id="holdingValue" style="color:var(--success)">
+            {{ currently_borrowed }}
+        </div>
+        {% endif %}
+        <div class="stat-sub">unit(s) not yet returned</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Transactions</div>
+        <div class="stat-value">{{ total_txns }}</div>
+        <div class="stat-sub">total activity</div>
+    </div>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px">
+
+    <!-- Account Info -->
+    <div class="card">
+        <div class="card-header">
+            <h3 class="card-title">Account Information</h3>
+        </div>
+        <div class="card-body">
+            <form method="POST">
+                <input type="hidden" name="action" value="update_info">
+                <div class="form-group">
+                    <label>Full Name</label>
+                    <input type="text" name="name" value="{{ user.name }}" required>
+                </div>
+                <div class="form-group">
+                    <label>Email Address</label>
+                    <input type="email" name="email" value="{{ user.email }}" required>
+                </div>
+                <div class="form-group">
+                    <label>Role</label>
+                    <input type="text" value="{{ user.role | title }}" disabled
+                        style="background:var(--surface);color:var(--text-muted);cursor:not-allowed">
+                </div>
+                <div class="form-group">
+                    <label>Member Since</label>
+                    <input type="text" value="{{ user.created_at[:10] }}" disabled
+                        style="background:var(--surface);color:var(--text-muted);cursor:not-allowed">
+                </div>
+                <button type="submit" class="btn btn-primary">Save Changes</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Change Password -->
+    <div class="card">
+        <div class="card-header">
+            <h3 class="card-title">Change Password</h3>
+        </div>
+        <div class="card-body">
+            <form method="POST">
+                <input type="hidden" name="action" value="change_password">
+                <div class="form-group">
+                    <label>Current Password</label>
+                    <input type="password" name="current_password" id="curPw" required>
+                </div>
+                <div class="form-group">
+                    <label>New Password</label>
+                    <input type="password" name="new_password" id="newPw" required minlength="6">
+                </div>
+                <div class="form-group">
+                    <label>Confirm New Password</label>
+                    <input type="password" name="confirm_password" id="conPw" required minlength="6">
+                </div>
+                <div id="pwMatchMsg" style="font-size:12px;margin-bottom:12px;display:none"></div>
+                <button type="submit" class="btn btn-primary">Update Password</button>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Currently Borrowed Items -->
+{% if borrowings %}
+<div class="card" style="margin-bottom:24px">
+    <div class="card-header" style="display:flex;align-items:center;justify-content:space-between">
+        <h3 class="card-title">Currently Borrowed ({{ borrowings | length }})</h3>
+        <a href="{{ url_for('my_items') }}" class="btn btn-secondary btn-sm">View Full List</a>
+    </div>
+    <div class="card-body" style="padding:0">
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Item</th>
+                        <th>Location</th>
+                        <th>Qty Borrowed</th>
+                        <th>Last Updated</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for b in borrowings %}
+                    <tr id="borrow-row-{{ b['item_id'] }}" data-item-id="{{ b['item_id'] }}"
+                        data-max="{{ b['quantity_borrowed'] }}" data-name="{{ b['item_name'] | e }}">
+                        <td><strong>{{ b['item_name'] }}</strong></td>
+                        <td>
+                            <span style="color:var(--text-muted)">{{ b['column_name'] }} › {{ b['box_name'] }}</span>
+                        </td>
+                        <td>
+                            <span class="badge badge-warning" id="prof-badge-{{ b['item_id'] }}">
+                                {{ b['quantity_borrowed'] }} unit{% if b['quantity_borrowed'] != 1 %}s{% endif %}
+                            </span>
+                        </td>
+                        <td style="color:var(--text-muted);font-size:13px">{{ b['updated_at'][:16] }}</td>
+                        <td>
+                            <button class="btn btn-success btn-sm" data-item-id="{{ b['item_id'] }}"
+                                onclick="openReturnModal(this)">
+                                Return
+                            </button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% else %}
+<div class="card" style="margin-bottom:24px">
+    <div class="card-header">
+        <h3 class="card-title">Currently Borrowed</h3>
+    </div>
+    <div class="card-body">
+        <div class="empty-state">
+            <div class="empty-icon">📦</div>
+            <div class="empty-title">Nothing borrowed</div>
+            <div class="empty-sub">You have no items checked out right now.</div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Quick Links -->
+<div style="display:flex;gap:12px">
+    <a href="{{ url_for('my_history') }}" class="btn btn-secondary">View Full History</a>
+    <a href="{{ url_for('scanner') }}" class="btn btn-secondary">Open Scanner</a>
+</div>
+
+<!-- Return Modal -->
+<div id="returnModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);
+            z-index:1000;align-items:center;justify-content:center">
+    <div class="card" style="width:360px;margin:0">
+        <div class="card-header">
+            <h3 class="card-title">Return Item</h3>
+        </div>
+        <div class="card-body">
+            <p style="margin:0 0 16px;color:var(--text-muted)">
+                Returning: <strong id="returnItemName" style="color:var(--text)"></strong>
+            </p>
+            <div class="form-group">
+                <label>Quantity to Return <span id="returnMaxLabel"
+                        style="color:var(--text-muted);font-weight:400"></span></label>
+                <input type="number" id="returnQty" min="1" value="1">
+            </div>
+            <div id="returnError" class="alert alert-error" style="display:none;margin-bottom:12px"></div>
+            <div style="display:flex;gap:8px">
+                <button class="btn btn-success" id="confirmReturnBtn" onclick="submitReturn()">Confirm Return</button>
+                <button class="btn btn-secondary" onclick="closeReturnModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    let returnItemId = null;
+    let returnMaxQty = 0;
+
+    function openReturnModal(btn) {
+        const row = btn.closest('tr');
+        returnItemId = parseInt(btn.dataset.itemId);
+        returnMaxQty = parseInt(row.dataset.max);
+        const name = row.dataset.name;
+
+        document.getElementById('returnItemName').textContent = name;
+        document.getElementById('returnMaxLabel').textContent = '(max ' + returnMaxQty + ')';
+        document.getElementById('returnQty').value = returnMaxQty;
+        document.getElementById('returnQty').max = returnMaxQty;
+        document.getElementById('returnError').style.display = 'none';
+
+        const modal = document.getElementById('returnModal');
+        modal.style.display = 'flex';
+    }
+
+    function closeReturnModal() {
+        document.getElementById('returnModal').style.display = 'none';
+        returnItemId = null;
+    }
+
+    async function submitReturn() {
+        const qty = parseInt(document.getElementById('returnQty').value);
+        const errEl = document.getElementById('returnError');
+        const btn = document.getElementById('confirmReturnBtn');
+        errEl.style.display = 'none';
+
+        if (!qty || qty <= 0) {
+            errEl.textContent = 'Enter a valid quantity.';
+            errEl.style.display = 'block';
+            return;
+        }
+        if (qty > returnMaxQty) {
+            errEl.textContent = 'You only have ' + returnMaxQty + ' unit(s) borrowed.';
+            errEl.style.display = 'block';
+            return;
+        }
+
+        btn.textContent = 'Returning...';
+        btn.disabled = true;
+
+        try {
+            const res = await fetch('/api/quick-return', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ item_id: returnItemId, quantity: qty })
+            });
+            const data = await res.json();
+
+            if (data.success) {
+                closeReturnModal();
+                showToast(data.message, 'success');
+
+                const row = document.getElementById('borrow-row-' + returnItemId);
+                if (row) {
+                    if (data.remaining_borrowed <= 0) {
+                        row.style.opacity = '0';
+                        row.style.transition = 'opacity 0.3s';
+                        setTimeout(function () {
+                            row.remove();
+                            // Update "Currently Holding" stat
+                            const holdEl = document.getElementById('holdingValue');
+                            if (holdEl) {
+                                const cur = parseInt(holdEl.textContent) - qty;
+                                holdEl.textContent = cur;
+                                holdEl.style.color = cur > 0 ? 'var(--warning)' : 'var(--success)';
+                            }
+                        }, 300);
+                    } else {
+                        // Update badge and stored max
+                        const badge = document.getElementById('prof-badge-' + returnItemId);
+                        if (badge) {
+                            badge.textContent = data.remaining_borrowed +
+                                ' unit' + (data.remaining_borrowed !== 1 ? 's' : '');
+                        }
+                        row.dataset.max = data.remaining_borrowed;
+                        // Update "Currently Holding" stat
+                        const holdEl = document.getElementById('holdingValue');
+                        if (holdEl) {
+                            const cur = parseInt(holdEl.textContent) - qty;
+                            holdEl.textContent = cur;
+                            holdEl.style.color = cur > 0 ? 'var(--warning)' : 'var(--success)';
+                        }
+                    }
+                }
+            } else {
+                errEl.textContent = data.error || 'Return failed.';
+                errEl.style.display = 'block';
+            }
+        } catch (e) {
+            errEl.textContent = 'Network error. Please try again.';
+            errEl.style.display = 'block';
+        } finally {
+            btn.textContent = 'Confirm Return';
+            btn.disabled = false;
+        }
+    }
+
+    // Password match live check
+    const newPw = document.getElementById('newPw');
+    const conPw = document.getElementById('conPw');
+    const msg = document.getElementById('pwMatchMsg');
+
+    function checkMatch() {
+        if (!conPw.value) { msg.style.display = 'none'; return; }
+        msg.style.display = 'block';
+        if (newPw.value === conPw.value) {
+            msg.textContent = '✓ Passwords match';
+            msg.style.color = 'var(--success)';
+        } else {
+            msg.textContent = '✗ Passwords do not match';
+            msg.style.color = 'var(--danger)';
+        }
+    }
+    newPw.addEventListener('input', checkMatch);
+    conPw.addEventListener('input', checkMatch);
+
+    // Close modal on backdrop click
+    document.getElementById('returnModal').addEventListener('click', function (e) {
+        if (e.target === this) closeReturnModal();
+    });
+</script>
+{% endblock %}

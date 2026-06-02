@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block title %}Reports — Edge2 Inventory{% endblock %}
+{% block page_title %}Reports{% endblock %}
+{% block page_meta %}Filterable transaction history{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h2>Transaction Reports</h2>
+  <a href="{{ url_for('reports_export', **filters) }}" class="btn btn-success">
+    ↓ Export CSV
+  </a>
+</div>
+
+<!-- Filter Form -->
+<div class="card" style="margin-bottom:18px;">
+  <div class="card-header"><span class="card-title">Filters</span></div>
+  <div class="card-body">
+    <form method="GET" action="{{ url_for('reports') }}">
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:14px;align-items:end;">
+        <div class="form-group" style="margin-bottom:0;">
+          <label>From Date</label>
+          <input type="date" name="from_date" value="{{ filters.from_date }}"/>
+        </div>
+        <div class="form-group" style="margin-bottom:0;">
+          <label>To Date</label>
+          <input type="date" name="to_date" value="{{ filters.to_date }}"/>
+        </div>
+        <div class="form-group" style="margin-bottom:0;">
+          <label>Type</label>
+          <select name="type">
+            <option value="">All Types</option>
+            <option value="take"    {% if filters.type == 'take'    %}selected{% endif %}>Take</option>
+            <option value="return"  {% if filters.type == 'return'  %}selected{% endif %}>Return</option>
+            <option value="restock" {% if filters.type == 'restock' %}selected{% endif %}>Restock</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin-bottom:0;">
+          <label>User</label>
+          <select name="user_id">
+            <option value="">All Users</option>
+            {% for u in all_users %}
+            <option value="{{ u.id }}" {% if filters.user_id|string == u.id|string %}selected{% endif %}>{{ u.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group" style="margin-bottom:0;">
+          <label>Column</label>
+          <select name="column_id">
+            <option value="">All Columns</option>
+            {% for c in all_columns %}
+            <option value="{{ c.id }}" {% if filters.column_id|string == c.id|string %}selected{% endif %}>{{ c.column_name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div style="display:flex;gap:8px;align-items:flex-end;">
+          <button type="submit" class="btn btn-primary" style="flex:1;">Apply</button>
+          <a href="{{ url_for('reports') }}" class="btn btn-secondary">Reset</a>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Results -->
+<div class="card">
+  <div class="card-header">
+    <span class="card-title">Results</span>
+    <span style="font-size:12.5px;color:var(--text-muted);">
+      {{ txns|length }} record{% if txns|length != 1 %}s{% endif %}
+      {% if txns|length == 500 %} <span style="color:var(--warning);">(limit: 500)</span>{% endif %}
+    </span>
+  </div>
+
+  {% if txns %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>User</th>
+          <th>Item</th>
+          <th>Location</th>
+          <th>Type</th>
+          <th>Qty</th>
+          <th>Timestamp</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in txns %}
+        <tr>
+          <td class="mono" style="color:var(--text-dim);">{{ t.id }}</td>
+          <td style="font-weight:500;">{{ t.user_name }}</td>
+          <td>{{ t.item_name }}</td>
+          <td style="color:var(--text-muted);font-size:12.5px;">{{ t.column_name }} › {{ t.box_name }}</td>
+          <td>
+            {% if t.type == 'take' %}
+              <span class="badge badge-info">take</span>
+            {% elif t.type == 'return' %}
+              <span class="badge badge-success">return</span>
+            {% else %}
+              <span class="badge badge-warning">restock</span>
+            {% endif %}
+          </td>
+          <td class="mono">{{ t.quantity }}</td>
+          <td class="mono" style="color:var(--text-muted);font-size:12px;">{{ t.timestamp }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state">
+    <div class="empty-icon">📋</div>
+    <div class="empty-title">No transactions found</div>
+    <div class="empty-sub">Try adjusting your filters.</div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

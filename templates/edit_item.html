@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Edit Item{% endblock %}
+{% block content %}
+
+<div class="page-header" style="margin-bottom:24px;">
+  <div class="breadcrumb"><a href="/dashboard">Dashboard</a> / <a href="/items">Items</a> / Edit</div>
+  <h1 class="page-title">Edit Item</h1>
+</div>
+
+<div class="card" style="max-width:540px;">
+  <div class="card-body">
+    {% if error %}
+    <div class="alert alert-error" style="margin-bottom:16px;">{{ error }}</div>
+    {% endif %}
+    <form method="POST">
+      <div class="form-group">
+        <label for="box_id">Box <span style="color:var(--danger)">*</span></label>
+        <select id="box_id" name="box_id" required>
+          <option value="">— Select a Box —</option>
+          {% for box in boxes %}
+          <option value="{{ box.id }}"
+            {% if request.form.get('box_id', item.box_id|string) == box.id|string %}selected{% endif %}>
+            {{ box.column_name }} › {{ box.box_name }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="item_name">Item Name <span style="color:var(--danger)">*</span></label>
+        <input type="text" id="item_name" name="item_name"
+          value="{{ request.form.get('item_name', item.item_name) }}" required>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+        <div class="form-group">
+          <label for="quantity">Quantity <span style="color:var(--danger)">*</span></label>
+          <input type="number" id="quantity" name="quantity" min="0"
+            value="{{ request.form.get('quantity', item.quantity) }}" required>
+        </div>
+        <div class="form-group">
+          <label for="min_stock">Min Stock <span style="color:var(--danger)">*</span></label>
+          <input type="number" id="min_stock" name="min_stock" min="0"
+            value="{{ request.form.get('min_stock', item.min_stock) }}" required>
+          <small style="color:var(--text-muted);">Alert threshold</small>
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="description">Description <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
+        <input type="text" id="description" name="description"
+          value="{{ request.form.get('description', item.description or '') }}">
+      </div>
+      <div style="display:flex;gap:10px;margin-top:20px;">
+        <button type="submit" class="btn btn-primary">Save Changes</button>
+        <a href="/items" class="btn btn-secondary">Cancel</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% endblock %}

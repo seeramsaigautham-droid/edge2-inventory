@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+{% block title %}My Items{% endblock %}
+
+{% block content %}
+<div class="page-header" style="margin-bottom:24px">
+  <div>
+    <h1 class="page-title">My Borrowed Items</h1>
+    <p style="color:var(--text-muted);margin:4px 0 0">Items you currently have checked out</p>
+  </div>
+  <div style="display:flex;gap:10px">
+    <a href="{{ url_for('my_history') }}" class="btn btn-secondary">View History</a>
+    <a href="{{ url_for('scanner') }}" class="btn btn-primary">Scan QR</a>
+  </div>
+</div>
+
+{% if borrowings %}
+<div class="card">
+  <div class="card-header" style="display:flex;align-items:center;justify-content:space-between">
+    <h3 class="card-title">Active Borrowings</h3>
+    <span class="badge badge-warning">{{ borrowings | length }} item{% if borrowings | length != 1 %}s{% endif %}</span>
+  </div>
+  <div class="card-body" style="padding:0">
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Item</th>
+            <th>Location</th>
+            <th>Qty Borrowed</th>
+            <th>In Stock</th>
+            <th>Last Updated</th>
+            <th>Return</th>
+          </tr>
+        </thead>
+        <tbody id="borrowTable">
+          {% for b in borrowings %}
+          <tr id="row-{{ b['item_id'] }}" data-item-id="{{ b['item_id'] }}" data-max="{{ b['quantity_borrowed'] }}">
+            <td><strong>{{ b['item_name'] }}</strong></td>
+            <td style="color:var(--text-muted);font-size:13px">
+              {{ b['column_name'] }} › {{ b['box_name'] }}
+            </td>
+            <td>
+              <span class="badge badge-warning" id="badge-{{ b['item_id'] }}">
+                {{ b['quantity_borrowed'] }}
+              </span>
+            </td>
+            <td>
+              <span style="font-family:var(--mono);font-size:13px;color:var(--text-muted)">
+                {{ b['current_stock'] }}
+              </span>
+            </td>
+            <td style="color:var(--text-muted);font-size:13px;white-space:nowrap">
+              {{ b['updated_at'][:16] }}
+            </td>
+            <td>
+              <div style="display:flex;gap:6px;align-items:center">
+                <input type="number" id="qty-{{ b['item_id'] }}" value="{{ b['quantity_borrowed'] }}" min="1"
+                  max="{{ b['quantity_borrowed'] }}" style="width:60px;padding:4px 8px;font-size:13px;
+                              background:var(--surface2);border:1px solid var(--border);
+                              border-radius:var(--radius-sm);color:var(--text);text-align:center">
+                <button class="btn btn-success btn-sm" data-item-id="{{ b['item_id'] }}" onclick="returnItem(this)">
+                  Return
+                </button>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<p style="color:var(--text-muted);font-size:13px;margin-top:12px">
+  You can also return items by scanning their column QR code in the
+  <a href="{{ url_for('scanner') }}" style="color:var(--accent)">scanner</a>.
+</p>
+
+{% else %}
+<div class="card">
+  <div class="card-body">
+    <div class="empty-state">
+      <div class="empty-icon">📦</div>
+      <div class="empty-title">Nothing borrowed</div>
+      <div class="empty-sub">You have no items checked out right now.<br>
+        Use the <a href="{{ url_for('scanner') }}" style="color:var(--accent)">QR scanner</a> to take items.
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<script>
+  async function returnItem(btn) {
+    const itemId = parseInt(btn.dataset.itemId);
+    const qtyInput = document.getElementById('qty-' + itemId);
+    const qty = parseInt(qtyInput.value);
+    const max = parseInt(qtyInput.max);
+
+    if (!qty || qty <= 0) {
+      showToast('Enter a valid quantity.', 'error');
+      return;
+    }
+    if (qty > max) {
+      showToast('You only have ' + max + ' unit(s) borrowed.', 'error');
+      return;
+    }
+
+    const origText = btn.textContent;
+    btn.textContent = '...';
+    btn.disabled = true;
+
+    try {
+      const res = await fetch('/api/quick-return', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_id: itemId, quantity: qty })
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        showToast(data.message, 'success');
+        if (data.remaining_borrowed <= 0) {
+          const row = document.getElementById('row-' + itemId);
+          if (row) {
+            row.style.opacity = '0';
+            row.style.transition = 'opacity 0.3s';
+            setTimeout(function () {
+              row.remove();
+              const tbody = document.getElementById('borrowTable');
+              if (tbody && tbody.children.length === 0) {
+                location.reload();
+              }
+            }, 300);
+          }
+        } else {
+          const badge = document.getElementById('badge-' + itemId);
+          if (badge) badge.textContent = data.remaining_borrowed;
+          qtyInput.max = data.remaining_borrowed;
+          qtyInput.value = data.remaining_borrowed;
+          btn.textContent = origText;
+          btn.disabled = false;
+        }
+      } else {
+        showToast(data.error || 'Return failed.', 'error');
+        btn.textContent = origText;
+        btn.disabled = false;
+      }
+    } catch (e) {
+      showToast('Network error. Please try again.', 'error');
+      btn.textContent = origText;
+      btn.disabled = false;
+    }
+  }
+</script>
+{% endblock %}
