@@ -13,7 +13,7 @@ app.secret_key = 'edge2systems_inventory_secret_2024'
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['PERMANENT_SESSION_LIFETIME'] = 28800  # 8 hours
-DB_PATH = os.path.join(os.path.dirname(__file__), 'instance', 'inventory.db')
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'instance', 'inventory.db')
 
 # ─── DB HELPERS ───────────────────────────────────────────────────────────────
 
@@ -1992,7 +1992,6 @@ def api_analytics_daily():
     except sqlite3.Error:
         return jsonify({'error': 'Database error'}), 500
 # ─── MAIN ─────────────────────────────────────────────────────────────────────
-
+init_db()
 if __name__ == '__main__':
-    init_db()
     app.run(host='0.0.0.0', port=5000, debug=True)
