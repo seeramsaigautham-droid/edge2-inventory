@@ -145,14 +145,3 @@ inventory_system/
 
 ---
 
-## Deployment
-
-This project is deployed on [Railway](https://railway.app) using Gunicorn.
-
-> **Note:** The app uses SQLite which resets on every redeploy on Railway. For persistent production data, migrate to PostgreSQL.
-
----
-
-## License
-
-This project is private and proprietary. All rights reserved.
