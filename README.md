@@ -1,4 +1,4 @@
-# ⬡ Edge2 Inventory System
+#  Edge 2 Inventory System
 
 A smart, QR-code-based inventory management system built with Python Flask. Designed for physical storage environments where items are organised into columns and boxes, tracked in real time via QR scanning.
 
