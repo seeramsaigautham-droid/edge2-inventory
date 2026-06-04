@@ -42,35 +42,13 @@
 <div class="card" style="margin-bottom:16px;">
   <div class="card-body" style="padding:14px 18px;">
     <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;">
-      <div class="form-group" style="margin:0;flex:1;min-width:160px;">
-        <label style="font-size:0.75rem;color:var(--text-muted);margin-bottom:4px;display:block;">Search</label>
-        <input type="text" id="filter-search" placeholder="Item name…" style="width:100%;" oninput="applyFilters()">
-      </div>
       <div class="form-group" style="margin:0;min-width:140px;">
-        <label style="font-size:0.75rem;color:var(--text-muted);margin-bottom:4px;display:block;">Column</label>
-        <select id="filter-column" onchange="onColumnChange()" style="width:100%;">
+        <label style="font-size:0.75rem;color:var(--text-muted);margin-bottom:4px;display:block;">Filter by Column</label>
+        <select id="filter-column" onchange="applyColumnFilter()" style="width:100%;">
           <option value="">All Columns</option>
           {% for col in all_columns %}
           <option value="{{ col.id }}">{{ col.column_name }}</option>
           {% endfor %}
-        </select>
-      </div>
-      <div class="form-group" style="margin:0;min-width:140px;">
-        <label style="font-size:0.75rem;color:var(--text-muted);margin-bottom:4px;display:block;">Box</label>
-        <select id="filter-box" onchange="applyFilters()" style="width:100%;">
-          <option value="">All Boxes</option>
-          {% for box in all_boxes %}
-          <option value="{{ box.id }}" data-column="{{ box.column_id }}">{{ box.box_name }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="form-group" style="margin:0;min-width:130px;">
-        <label style="font-size:0.75rem;color:var(--text-muted);margin-bottom:4px;display:block;">Status</label>
-        <select id="filter-status" onchange="applyFilters()" style="width:100%;">
-          <option value="">All Status</option>
-          <option value="out">Out of Stock</option>
-          <option value="low">Low Stock</option>
-          <option value="ok">Healthy</option>
         </select>
       </div>
       <button class="btn btn-secondary" onclick="clearFilters()" style="white-space:nowrap;margin-bottom:0;">Clear</button>
@@ -78,83 +56,69 @@
   </div>
 </div>
 
-<!-- Result Count -->
-<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
-  <span style="color:var(--text-muted);font-size:0.85rem;">
-    Showing <strong id="result-count" style="color:var(--text);">{{ total_items }}</strong> item{{ 's' if total_items != 1 else '' }}
-  </span>
-</div>
-
-<!-- Items Table -->
-<div class="card">
-  <div class="table-wrap" id="table-wrap">
-    <table id="inventory-table">
+<!-- Boxes Table -->
+<div class="card" id="boxes-view">
+  <div class="table-wrap">
+    <table id="boxes-table">
       <thead>
         <tr>
-          <th>Item</th>
-          <th>Column › Box</th>
-          <th>Quantity</th>
-          <th>Min Stock</th>
-          <th>Status</th>
-          {% if session.get('role') in ('admin', 'storekeeper') %}
-          <th style="text-align:right;">Actions</th>
-          {% endif %}
+          <th>Box Name</th>
+          <th>Column</th>
+          <th>Description</th>
+          <th>Items</th>
+          <th>Total Qty</th>
+          <th>Actions</th>
         </tr>
       </thead>
-      <tbody id="inventory-body">
-        {% for item in items %}
-        {% set status = 'out' if item.quantity == 0 else ('low' if item.quantity <= item.min_stock else 'ok') %}
-        <tr class="inv-row"
-          data-name="{{ item.item_name | lower }}"
-          data-column="{{ item.column_id }}"
-          data-box="{{ item.box_id }}"
-          data-status="{{ status }}"
-          style="{% if status == 'out' %}border-left:3px solid var(--danger){% elif status == 'low' %}border-left:3px solid var(--warning){% endif %}">
+      <tbody id="boxes-body">
+        {% for box in boxes_with_stats %}
+        <tr class="box-row" data-box-id="{{ box.id }}" data-column-id="{{ box.column_id }}">
           <td>
-            <div style="font-weight:600;color:var(--text);">{{ item.item_name }}</div>
-            {% if item.description %}
-            <div style="font-size:0.78rem;color:var(--text-muted);margin-top:2px;">{{ item.description }}</div>
+            <span style="font-weight:600;color:var(--text);">{{ box.box_name }}</span>
+            {% if box.out_of_stock_count > 0 %}
+              <span class="badge badge-danger" style="margin-left:6px;font-size:0.7rem;">{{ box.out_of_stock_count }} out</span>
+            {% elif box.low_stock_count > 0 %}
+              <span class="badge badge-warning" style="margin-left:6px;font-size:0.7rem;">{{ box.low_stock_count }} low</span>
             {% endif %}
           </td>
           <td>
-            <a href="{{ url_for('column_detail', column_id=item.column_id) }}" style="color:var(--text-muted);text-decoration:none;">{{ item.column_name }}</a>
-            <span style="color:var(--text-dim);margin:0 4px;">›</span>
-            <a href="{{ url_for('box_detail', box_id=item.box_id) }}" style="color:var(--accent);text-decoration:none;">{{ item.box_name }}</a>
+            <span class="badge badge-info" style="font-size:0.78rem;">{{ box.column_name }}</span>
+          </td>
+          <td style="color:var(--text-muted);">{{ box.description or '—' }}</td>
+          <td>
+            <span style="font-family:var(--mono);color:var(--text-muted);">{{ box.item_count }} item{{ 's' if box.item_count != 1 else '' }}</span>
           </td>
           <td>
-            {% set qty_color = 'var(--danger)' if item.quantity == 0 else ('var(--warning)' if item.quantity <= item.min_stock else 'var(--text)') %}
-            <span style="font-family:var(--mono);font-weight:700;color:{{ qty_color }};" id="qty-{{ item.id }}">{{ item.quantity }}</span>
+            <span style="font-family:var(--mono);font-weight:700;color:var(--accent);">{{ box.total_quantity }}</span>
           </td>
-          <td style="color:var(--text-muted);font-family:var(--mono);">{{ item.min_stock }}</td>
-          <td>
-            {% if item.quantity == 0 %}
-              <span class="badge badge-danger" id="badge-{{ item.id }}">Out of Stock</span>
-            {% elif item.quantity <= item.min_stock %}
-              <span class="badge badge-warning" id="badge-{{ item.id }}">Low Stock</span>
-            {% else %}
-              <span class="badge badge-success" id="badge-{{ item.id }}">Healthy</span>
-            {% endif %}
-          </td>
-          {% if session.get('role') in ('admin', 'storekeeper') %}
-          <td style="text-align:right;white-space:nowrap;">
-            <div style="display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap;">
-              <button class="btn btn-success btn-sm"
-                data-item-id="{{ item.id }}"
-                data-item-name="{{ item.item_name | e }}"
-                data-item-qty="{{ item.quantity }}"
-                onclick="openRestock(this)">Restock</button>
-              <a href="{{ url_for('edit_item', item_id=item.id) }}" class="btn btn-secondary btn-sm">Edit</a>
+          <td style="white-space:nowrap;">
+            <div style="display:flex;gap:6px;align-items:center;">
+              <button class="btn btn-secondary btn-sm"
+                onclick="toggleItems({{ box.id }}, this)"
+                id="toggle-btn-{{ box.id }}">
+                View Items
+              </button>
+              {% if session.get('role') in ('admin', 'storekeeper') %}
+              <a href="{{ url_for('edit_box', box_id=box.id) }}" class="btn btn-secondary btn-sm">Edit</a>
+              {% endif %}
               {% if session.get('role') == 'admin' %}
-              <form id="del-inv-{{ item.id }}" method="POST" action="{{ url_for('delete_item', item_id=item.id) }}" style="display:inline;">
+              <form id="del-box-{{ box.id }}" method="POST" action="{{ url_for('delete_box', box_id=box.id) }}" style="display:inline;">
                 <button type="button" class="btn btn-danger btn-sm"
-                  onclick="openConfirm('Delete &quot;{{ item.item_name | e }}&quot;? This cannot be undone.', 'del-inv-{{ item.id }}')">
+                  onclick="openConfirm('Delete &quot;{{ box.box_name | e }}&quot;? All items inside will also be deleted.', 'del-box-{{ box.id }}')">
                   Delete
                 </button>
               </form>
               {% endif %}
             </div>
           </td>
-          {% endif %}
+        </tr>
+        <!-- Expandable items sub-row -->
+        <tr class="items-subrow" id="items-row-{{ box.id }}" style="display:none;" data-column-id="{{ box.column_id }}">
+          <td colspan="6" style="padding:0;background:var(--bg);border-top:none;">
+            <div id="items-container-{{ box.id }}" style="padding:12px 20px 16px 40px;">
+              <div style="color:var(--text-muted);font-size:0.85rem;padding:12px 0;">Loading items…</div>
+            </div>
+          </td>
         </tr>
         {% endfor %}
       </tbody>
@@ -163,9 +127,9 @@
 
   <div id="empty-state" class="empty-state" style="display:none;">
     <div class="empty-icon">⊠</div>
-    <div class="empty-title">No items match your filters</div>
-    <div class="empty-sub">Try adjusting your search or filter criteria.</div>
-    <button class="btn btn-secondary" style="margin-top:16px;" onclick="clearFilters()">Clear Filters</button>
+    <div class="empty-title">No boxes match your filter</div>
+    <div class="empty-sub">Try selecting a different column.</div>
+    <button class="btn btn-secondary" style="margin-top:16px;" onclick="clearFilters()">Clear Filter</button>
   </div>
 </div>
 
@@ -194,61 +158,156 @@
 
 {% block scripts %}
 <script>
-  /* ── Box options for cascade filter ── */
-  const allBoxOptions = Array.from(document.querySelectorAll('#filter-box option')).map(o => ({
-    value: o.value, text: o.text, col: o.dataset.column || ''
-  }));
+  /* ── Embed items data from server for instant rendering ── */
+  const allItemsData = {
+    {% for box in boxes_with_stats %}
+    {{ box.id }}: [
+      {% for item in items if item.box_id == box.id %}
+      {
+        id: {{ item.id }},
+        name: {{ item.item_name | tojson }},
+        description: {{ (item.description or '') | tojson }},
+        quantity: {{ item.quantity }},
+        min_stock: {{ item.min_stock }},
+        box_id: {{ item.box_id }},
+        column_id: {{ item.column_id }},
+        status: {% if item.quantity == 0 %}'out'{% elif item.quantity <= item.min_stock %}'low'{% else %}'ok'{% endif %}
+      },
+      {% endfor %}
+    ],
+    {% endfor %}
+  };
 
-  function onColumnChange() {
-    const colId  = document.getElementById('filter-column').value;
-    const boxSel = document.getElementById('filter-box');
-    boxSel.innerHTML = '<option value="">All Boxes</option>';
-    allBoxOptions.forEach(opt => {
-      if (!opt.value) return;
-      if (!colId || opt.col === colId) {
-        const o = document.createElement('option');
-        o.value = opt.value; o.textContent = opt.text; o.dataset.column = opt.col;
-        boxSel.appendChild(o);
-      }
-    });
-    applyFilters();
-  }
+  const isPrivileged = {{ 'true' if session.get('role') in ('admin', 'storekeeper') else 'false' }};
+  const isAdmin = {{ 'true' if session.get('role') == 'admin' else 'false' }};
 
-  function applyFilters() {
-    const search = document.getElementById('filter-search').value.trim().toLowerCase();
-    const colId  = document.getElementById('filter-column').value;
-    const boxId  = document.getElementById('filter-box').value;
-    const status = document.getElementById('filter-status').value;
-    const rows   = document.querySelectorAll('.inv-row');
-    let visible  = 0;
+  /* ── Column filter ── */
+  function applyColumnFilter() {
+    const colId = document.getElementById('filter-column').value;
+    const boxRows  = document.querySelectorAll('.box-row');
+    const subRows  = document.querySelectorAll('.items-subrow');
+    let visible = 0;
 
-    rows.forEach(row => {
-      const show = (!search || row.dataset.name.includes(search))
-        && (!colId  || row.dataset.column === colId)
-        && (!boxId  || row.dataset.box    === boxId)
-        && (!status || row.dataset.status === status);
+    boxRows.forEach(row => {
+      const show = !colId || row.dataset.columnId === colId;
       row.style.display = show ? '' : 'none';
-      if (show) visible++;
+      visible += show ? 1 : 0;
+    });
+    subRows.forEach(row => {
+      const show = !colId || row.dataset.columnId === colId;
+      row.style.display = show ? 'none' : 'none'; // keep collapsed on filter change
+    });
+    // Re-collapse all toggles when filter changes
+    document.querySelectorAll('[id^="toggle-btn-"]').forEach(btn => {
+      btn.textContent = 'View Items';
+      btn.classList.remove('btn-primary');
+      btn.classList.add('btn-secondary');
     });
 
-    document.getElementById('result-count').textContent = visible;
-    document.getElementById('empty-state').style.display  = visible === 0 ? 'flex' : 'none';
-    document.getElementById('table-wrap').style.display   = visible === 0 ? 'none' : '';
+    const tableWrap = document.querySelector('.table-wrap');
+    const emptyState = document.getElementById('empty-state');
+    tableWrap.style.display = visible === 0 ? 'none' : '';
+    emptyState.style.display = visible === 0 ? 'flex' : 'none';
   }
 
   function clearFilters() {
-    document.getElementById('filter-search').value  = '';
-    document.getElementById('filter-column').value  = '';
-    document.getElementById('filter-status').value  = '';
-    const boxSel = document.getElementById('filter-box');
-    boxSel.innerHTML = '<option value="">All Boxes</option>';
-    allBoxOptions.forEach(opt => {
-      if (!opt.value) return;
-      const o = document.createElement('option');
-      o.value = opt.value; o.textContent = opt.text; o.dataset.column = opt.col;
-      boxSel.appendChild(o);
-    });
-    applyFilters();
+    document.getElementById('filter-column').value = '';
+    applyColumnFilter();
+  }
+
+  /* ── Toggle items sub-row ── */
+  function toggleItems(boxId, btn) {
+    const subRow   = document.getElementById('items-row-' + boxId);
+    const isOpen   = subRow.style.display !== 'none';
+
+    if (isOpen) {
+      subRow.style.display = 'none';
+      btn.textContent = 'View Items';
+      btn.classList.remove('btn-primary');
+      btn.classList.add('btn-secondary');
+      return;
+    }
+
+    subRow.style.display = '';
+    btn.textContent = 'Hide Items';
+    btn.classList.remove('btn-secondary');
+    btn.classList.add('btn-primary');
+
+    renderItems(boxId);
+  }
+
+  function renderItems(boxId) {
+    const container = document.getElementById('items-container-' + boxId);
+    const items = allItemsData[boxId] || [];
+
+    if (items.length === 0) {
+      container.innerHTML = `
+        <div class="empty-state" style="padding:20px 0;border:none;background:none;">
+          <div class="empty-icon" style="font-size:1.5rem;">📦</div>
+          <div class="empty-title" style="font-size:0.95rem;">No items in this box</div>
+          ${isPrivileged ? `<a href="/items/add" class="btn btn-primary btn-sm" style="margin-top:10px;">+ Add Item</a>` : ''}
+        </div>`;
+      return;
+    }
+
+    const statusLabel = { out: 'Out of Stock', low: 'Low Stock', ok: 'Healthy' };
+    const statusClass = { out: 'badge-danger', low: 'badge-warning', ok: 'badge-success' };
+    const qtyColor    = { out: 'var(--danger)', low: 'var(--warning)', ok: 'var(--text)' };
+
+    const rows = items.map(item => `
+      <tr id="inv-row-${item.id}"
+        style="${item.status === 'out' ? 'border-left:3px solid var(--danger)' : item.status === 'low' ? 'border-left:3px solid var(--warning)' : ''}">
+        <td style="padding-left:12px;">
+          <div style="font-weight:600;color:var(--text);">${escHtml(item.name)}</div>
+          ${item.description ? `<div style="font-size:0.78rem;color:var(--text-muted);margin-top:2px;">${escHtml(item.description)}</div>` : ''}
+        </td>
+        <td>
+          <span id="qty-${item.id}" style="font-family:var(--mono);font-weight:700;color:${qtyColor[item.status]};">${item.quantity}</span>
+        </td>
+        <td style="color:var(--text-muted);font-family:var(--mono);">${item.min_stock}</td>
+        <td><span class="badge ${statusClass[item.status]}" id="badge-${item.id}">${statusLabel[item.status]}</span></td>
+        ${isPrivileged ? `
+        <td style="text-align:right;white-space:nowrap;">
+          <div style="display:flex;gap:6px;justify-content:flex-end;">
+            <button class="btn btn-success btn-sm"
+              data-item-id="${item.id}"
+              data-item-name="${escAttr(item.name)}"
+              data-item-qty="${item.quantity}"
+              onclick="openRestock(this)">Restock</button>
+            <a href="/items/edit/${item.id}" class="btn btn-secondary btn-sm">Edit</a>
+            ${isAdmin ? `
+            <form id="del-inv-${item.id}" method="POST" action="/items/delete/${item.id}" style="display:inline;">
+              <button type="button" class="btn btn-danger btn-sm"
+                onclick="openConfirm('Delete &quot;${escAttr(item.name)}&quot;? This cannot be undone.', 'del-inv-${item.id}')">
+                Delete
+              </button>
+            </form>` : ''}
+          </div>
+        </td>` : '<td></td>'}
+      </tr>`).join('');
+
+    container.innerHTML = `
+      <div style="border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;margin-top:4px;">
+        <table style="margin:0;">
+          <thead>
+            <tr style="background:var(--surface2);">
+              <th style="padding-left:12px;">Item</th>
+              <th>Quantity</th>
+              <th>Min Stock</th>
+              <th>Status</th>
+              ${isPrivileged ? '<th style="text-align:right;">Actions</th>' : '<th></th>'}
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  }
+
+  function escHtml(str) {
+    return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+  function escAttr(str) {
+    return String(str).replace(/"/g,'&quot;').replace(/'/g,'&#39;');
   }
 
   /* ── Restock Modal ── */
@@ -256,10 +315,10 @@
 
   function openRestock(btn) {
     restockItemId = btn.dataset.itemId;
-    document.getElementById('restock-title').textContent    = 'Restock — ' + btn.dataset.itemName;
-    document.getElementById('restock-current').textContent  = btn.dataset.itemQty;
-    document.getElementById('restock-qty').value            = 1;
-    document.getElementById('restock-error').style.display  = 'none';
+    document.getElementById('restock-title').textContent   = 'Restock — ' + btn.dataset.itemName;
+    document.getElementById('restock-current').textContent = btn.dataset.itemQty;
+    document.getElementById('restock-qty').value           = 1;
+    document.getElementById('restock-error').style.display = 'none';
     document.getElementById('restock-modal').classList.add('open');
     setTimeout(() => document.getElementById('restock-qty').focus(), 50);
   }
@@ -292,28 +351,38 @@
       const data = await res.json();
 
       if (data.success) {
-        const newQty   = data.new_quantity;
-        const qtyEl    = document.getElementById('qty-' + restockItemId);
-        const badgeEl  = document.getElementById('badge-' + restockItemId);
-        const row      = qtyEl ? qtyEl.closest('tr') : null;
-        const minStock = row ? parseInt(row.querySelector('td:nth-child(4)').textContent, 10) : 0;
+        const newQty  = data.new_quantity;
+        const qtyEl   = document.getElementById('qty-' + restockItemId);
+        const badgeEl = document.getElementById('badge-' + restockItemId);
+        const row     = document.getElementById('inv-row-' + restockItemId);
+
+        // Find min_stock from allItemsData
+        let minStock = 0;
+        for (const boxId in allItemsData) {
+          const found = allItemsData[boxId].find(i => String(i.id) === String(restockItemId));
+          if (found) { minStock = found.min_stock; found.quantity = newQty; break; }
+        }
+
+        const newStatus = newQty === 0 ? 'out' : (newQty <= minStock ? 'low' : 'ok');
+        const colorMap  = { out: 'var(--danger)', low: 'var(--warning)', ok: 'var(--text)' };
+        const classMap  = { out: 'badge badge-danger', low: 'badge badge-warning', ok: 'badge badge-success' };
+        const textMap   = { out: 'Out of Stock', low: 'Low Stock', ok: 'Healthy' };
 
         if (qtyEl) {
           qtyEl.textContent = newQty;
-          const newStatus  = newQty === 0 ? 'out' : (newQty <= minStock ? 'low' : 'ok');
-          const colorMap   = { out: 'var(--danger)', low: 'var(--warning)', ok: 'var(--text)' };
           qtyEl.style.color = 'var(--success)';
           setTimeout(() => { qtyEl.style.transition = 'color 0.8s'; qtyEl.style.color = colorMap[newStatus]; }, 600);
-          if (row) row.dataset.status = newStatus;
         }
         if (badgeEl) {
-          const newStatus = newQty === 0 ? 'out' : (newQty <= minStock ? 'low' : 'ok');
-          const classMap  = { out: 'badge badge-danger', low: 'badge badge-warning', ok: 'badge badge-success' };
-          const textMap   = { out: 'Out of Stock', low: 'Low Stock', ok: 'Healthy' };
           badgeEl.className   = classMap[newStatus];
           badgeEl.textContent = textMap[newStatus];
         }
-        const restockBtn = document.querySelector('[data-item-id="' + restockItemId + '"]');
+        if (row) {
+          row.style.borderLeft = newStatus === 'out' ? '3px solid var(--danger)'
+                               : newStatus === 'low' ? '3px solid var(--warning)' : '';
+        }
+        // Update restock btn qty
+        const restockBtn = document.querySelector(`[data-item-id="${restockItemId}"]`);
         if (restockBtn) restockBtn.dataset.itemQty = newQty;
 
         closeRestock();

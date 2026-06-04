@@ -1460,6 +1460,21 @@ def inventory():
         ORDER BY col.column_name, b.box_name, ii.item_name
     """).fetchall()
 
+    # Box-level aggregated data for the box-style table view
+    boxes_with_stats = conn.execute("""
+        SELECT b.id, b.box_name, b.description,
+               col.id as column_id, col.column_name,
+               COUNT(ii.id) as item_count,
+               COALESCE(SUM(ii.quantity), 0) as total_quantity,
+               SUM(CASE WHEN ii.quantity = 0 THEN 1 ELSE 0 END) as out_of_stock_count,
+               SUM(CASE WHEN ii.quantity > 0 AND ii.quantity <= ii.min_stock THEN 1 ELSE 0 END) as low_stock_count
+        FROM boxes b
+        JOIN columns col ON b.column_id = col.id
+        LEFT JOIN inventory_items ii ON ii.box_id = b.id
+        GROUP BY b.id
+        ORDER BY col.column_name, b.box_name
+    """).fetchall()
+
     all_columns = conn.execute("SELECT id, column_name FROM columns ORDER BY column_name").fetchall()
     all_boxes   = conn.execute("""
         SELECT b.id, b.box_name, b.column_id, col.column_name
@@ -1475,6 +1490,7 @@ def inventory():
     conn.close()
     return render_template('inventory.html',
         items=all_items,
+        boxes_with_stats=boxes_with_stats,
         all_columns=all_columns,
         all_boxes=all_boxes,
         total_items=total_items,
