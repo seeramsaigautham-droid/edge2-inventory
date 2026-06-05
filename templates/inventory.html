@@ -237,7 +237,7 @@
       min_stock:   {{ item.min_stock }},
       box_id:      {{ item.box_id }},
       column_id:   {{ item.column_id }},
-      status:      {{ 'out' | tojson if item.quantity == 0 else ('low' | tojson if item.quantity <= item.min_stock else 'ok' | tojson) }}
+      status:      "{% if item.quantity == 0 %}out{% elif item.quantity <= item.min_stock %}low{% else %}ok{% endif %}"
     };
     if (allItemsData[entry.box_id]) allItemsData[entry.box_id].push(entry);
   })();
