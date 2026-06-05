@@ -96,10 +96,6 @@
                 View Items
               </button>
               {% if session.get('role') in ('admin', 'storekeeper') %}
-              <button class="btn btn-primary btn-sm"
-                onclick="openAddItemModal({{ box.id }}, {{ box.column_id }}, {{ box.box_name | tojson }}, {{ box.column_name | tojson }})">
-                + Add Item
-              </button>
               <a href="{{ url_for('edit_box', box_id=box.id) }}" class="btn btn-secondary btn-sm">Edit</a>
               {% endif %}
               {% if session.get('role') == 'admin' %}
@@ -136,62 +132,6 @@
 </div>
 
 {% if session.get('role') in ('admin', 'storekeeper') %}
-<!-- ADD ITEM MODAL -->
-<div id="add-item-modal" class="modal-overlay">
-  <div class="modal-box" style="max-width:480px;width:100%;">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
-      <div class="modal-title" style="margin:0;">Add Item</div>
-      <button onclick="closeAddItemModal()"
-        style="background:none;border:none;color:var(--text-muted);font-size:1.25rem;cursor:pointer;line-height:1;padding:4px;">✕</button>
-    </div>
-    <!-- Locked location display -->
-    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;margin-bottom:20px;display:flex;gap:20px;align-items:center;">
-      <div>
-        <div style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px;">Column</div>
-        <div id="modal-column-name" style="font-weight:600;color:var(--text);font-size:0.9rem;">—</div>
-      </div>
-      <div style="width:1px;height:32px;background:var(--border);"></div>
-      <div>
-        <div style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px;">Box</div>
-        <div id="modal-box-name" style="font-weight:600;color:var(--accent);font-size:0.9rem;">—</div>
-      </div>
-      <div style="margin-left:auto;">
-        <span style="font-size:0.7rem;color:var(--text-dim);background:var(--bg);border:1px solid var(--border2);border-radius:4px;padding:2px 7px;">locked</span>
-      </div>
-    </div>
-    <form id="add-item-form" method="POST" action="/items/add">
-      <input type="hidden" name="box_id" id="modal-box-id">
-      <input type="hidden" name="next"   value="/inventory">
-      <div id="add-item-error" class="alert alert-error" style="display:none;margin-bottom:14px;"></div>
-      <div class="form-group">
-        <label for="modal-item-name">Item Name <span style="color:var(--danger)">*</span></label>
-        <input type="text" id="modal-item-name" name="item_name"
-          placeholder="e.g. Arduino Uno" required autocomplete="off">
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
-        <div class="form-group">
-          <label for="modal-quantity">Initial Quantity <span style="color:var(--danger)">*</span></label>
-          <input type="number" id="modal-quantity" name="quantity" min="0" value="0" required>
-        </div>
-        <div class="form-group">
-          <label for="modal-min-stock">Min Stock <span style="color:var(--danger)">*</span></label>
-          <input type="number" id="modal-min-stock" name="min_stock" min="0" value="5" required>
-          <small style="color:var(--text-muted);">Alert threshold</small>
-        </div>
-      </div>
-      <div class="form-group">
-        <label for="modal-description">Description <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
-        <input type="text" id="modal-description" name="description"
-          placeholder="e.g. ATmega328P based dev board">
-      </div>
-      <div class="modal-actions" style="margin-top:20px;">
-        <button type="button" class="btn btn-secondary" onclick="closeAddItemModal()">Cancel</button>
-        <button type="submit" class="btn btn-primary" id="add-item-submit-btn">Save Item</button>
-      </div>
-    </form>
-  </div>
-</div>
-
 <!-- RESTOCK MODAL -->
 <div id="restock-modal" class="modal-overlay">
   <div class="modal-box">
@@ -218,48 +158,12 @@
 <script>
 (function () {
 
-  /* ══════════════════════════════════════════════════════════════
-     Dump ALL item data in one shot as a single JSON object.
-     This avoids any per-item Jinja-in-JS escaping issues entirely.
-  ══════════════════════════════════════════════════════════════ */
   var allItemsData = {{ items_json | safe }};
 
   var isPrivileged = {{ 'true' if session.get('role') in ('admin', 'storekeeper') else 'false' }};
   var isAdmin      = {{ 'true' if session.get('role') == 'admin' else 'false' }};
 
-  /* ══════════════════════════════════════════
-     ADD ITEM MODAL
-  ══════════════════════════════════════════ */
-  function openAddItemModal(boxId, columnId, boxName, columnName) {
-    var modal = document.getElementById('add-item-modal');
-    if (!modal) return;
-    document.getElementById('modal-box-name').textContent    = boxName;
-    document.getElementById('modal-column-name').textContent = columnName;
-    document.getElementById('modal-box-id').value            = boxId;
-    document.getElementById('modal-item-name').value         = '';
-    document.getElementById('modal-quantity').value          = '0';
-    document.getElementById('modal-min-stock').value         = '5';
-    document.getElementById('modal-description').value       = '';
-    document.getElementById('add-item-error').style.display  = 'none';
-    modal.classList.add('open');
-    setTimeout(function(){ document.getElementById('modal-item-name').focus(); }, 80);
-  }
-  window.openAddItemModal = openAddItemModal;
-
-  function closeAddItemModal() {
-    var modal = document.getElementById('add-item-modal');
-    if (modal) modal.classList.remove('open');
-  }
-  window.closeAddItemModal = closeAddItemModal;
-
-  var addModal = document.getElementById('add-item-modal');
-  if (addModal) {
-    addModal.addEventListener('click', function(e){ if (e.target === this) closeAddItemModal(); });
-  }
-
-  /* ══════════════════════════════════════════
-     COLUMN FILTER
-  ══════════════════════════════════════════ */
+  /* ── COLUMN FILTER ── */
   function applyColumnFilter() {
     var colId   = document.getElementById('filter-column').value;
     var boxRows = document.querySelectorAll('.box-row');
@@ -291,9 +195,7 @@
   }
   window.clearFilters = clearFilters;
 
-  /* ══════════════════════════════════════════
-     TOGGLE ITEMS SUB-ROW
-  ══════════════════════════════════════════ */
+  /* ── TOGGLE ITEMS SUB-ROW ── */
   function toggleItems(boxId, btn) {
     var subRow = document.getElementById('items-row-' + boxId);
     var isOpen = subRow.style.display !== 'none';
@@ -317,29 +219,11 @@
     var items     = allItemsData[boxId] || [];
 
     if (items.length === 0) {
-      /* Use addEventListener — never inline onclick with dynamic strings */
-      var boxRow = document.querySelector('.box-row[data-box-id="' + boxId + '"]');
-      var bName  = boxRow ? boxRow.querySelector('td span[style*="font-weight"]').textContent.trim() : '';
-      var cName  = boxRow ? boxRow.querySelector('.badge-info').textContent.trim() : '';
-      var colId  = boxRow ? boxRow.dataset.columnId : '';
-
       container.innerHTML =
         '<div class="empty-state" style="padding:20px 0;border:none;background:none;">' +
           '<div class="empty-icon" style="font-size:1.5rem;">📦</div>' +
           '<div class="empty-title" style="font-size:0.95rem;">No items in this box yet</div>' +
-          (isPrivileged
-            ? '<button class="btn btn-primary btn-sm" style="margin-top:10px;" id="empty-add-btn-' + boxId + '">+ Add Item</button>'
-            : '') +
         '</div>';
-
-      if (isPrivileged) {
-        var emptyBtn = document.getElementById('empty-add-btn-' + boxId);
-        if (emptyBtn) {
-          emptyBtn.addEventListener('click', function() {
-            openAddItemModal(parseInt(boxId, 10), parseInt(colId, 10), bName, cName);
-          });
-        }
-      }
       return;
     }
 
@@ -394,9 +278,7 @@
     return String(str).replace(/"/g,'&quot;').replace(/'/g,'&#39;');
   }
 
-  /* ══════════════════════════════════════════
-     RESTOCK MODAL
-  ══════════════════════════════════════════ */
+  /* ── RESTOCK MODAL ── */
   var restockItemId = null;
 
   function openRestock(btn) {
