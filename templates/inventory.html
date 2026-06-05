@@ -219,30 +219,13 @@
 (function () {
 
   /* ══════════════════════════════════════════════════════════════
-     BUILD allItemsData safely using a single tojson dump.
+     Dump ALL item data in one shot as a single JSON object.
+     This avoids any per-item Jinja-in-JS escaping issues entirely.
   ══════════════════════════════════════════════════════════════ */
-  const allItemsData = {};
-  {% for box in boxes_with_stats %}
-  allItemsData[{{ box.id }}] = [];
-  {% endfor %}
-  {% for item in items %}
-  (function(){
-    var entry = {
-      id:          {{ item.id }},
-      name:        {{ item.item_name  | tojson }},
-      description: {{ (item.description or '') | tojson }},
-      quantity:    {{ item.quantity }},
-      min_stock:   {{ item.min_stock }},
-      box_id:      {{ item.box_id }},
-      column_id:   {{ item.column_id }},
-      status:      "{% if item.quantity == 0 %}out{% elif item.quantity <= item.min_stock %}low{% else %}ok{% endif %}"
-    };
-    if (allItemsData[entry.box_id]) allItemsData[entry.box_id].push(entry);
-  })();
-  {% endfor %}
+  var allItemsData = {{ items_json | safe }};
 
-  const isPrivileged = {{ 'true' if session.get('role') in ('admin', 'storekeeper') else 'false' }};
-  const isAdmin      = {{ 'true' if session.get('role') == 'admin' else 'false' }};
+  var isPrivileged = {{ 'true' if session.get('role') in ('admin', 'storekeeper') else 'false' }};
+  var isAdmin      = {{ 'true' if session.get('role') == 'admin' else 'false' }};
 
   /* ══════════════════════════════════════════
      ADD ITEM MODAL
@@ -334,13 +317,11 @@
     var items     = allItemsData[boxId] || [];
 
     if (items.length === 0) {
-      /* ── FIX: read box/column info from the DOM row, then attach
-         the click handler via addEventListener to avoid any
-         quote-escaping / SyntaxError from inline onclick strings. ── */
-      var boxRow  = document.querySelector('.box-row[data-box-id="' + boxId + '"]');
-      var bName   = boxRow ? boxRow.querySelector('td span[style*="font-weight"]').textContent.trim() : '';
-      var cName   = boxRow ? boxRow.querySelector('.badge-info').textContent.trim() : '';
-      var colId   = boxRow ? boxRow.dataset.columnId : '';
+      /* Use addEventListener — never inline onclick with dynamic strings */
+      var boxRow = document.querySelector('.box-row[data-box-id="' + boxId + '"]');
+      var bName  = boxRow ? boxRow.querySelector('td span[style*="font-weight"]').textContent.trim() : '';
+      var cName  = boxRow ? boxRow.querySelector('.badge-info').textContent.trim() : '';
+      var colId  = boxRow ? boxRow.dataset.columnId : '';
 
       container.innerHTML =
         '<div class="empty-state" style="padding:20px 0;border:none;background:none;">' +
@@ -351,11 +332,10 @@
             : '') +
         '</div>';
 
-      /* Attach handler after innerHTML is set — no inline onclick needed */
       if (isPrivileged) {
         var emptyBtn = document.getElementById('empty-add-btn-' + boxId);
         if (emptyBtn) {
-          emptyBtn.addEventListener('click', function () {
+          emptyBtn.addEventListener('click', function() {
             openAddItemModal(parseInt(boxId, 10), parseInt(colId, 10), bName, cName);
           });
         }

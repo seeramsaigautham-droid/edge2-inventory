@@ -1487,9 +1487,36 @@ def inventory():
     low_stock_count = sum(1 for i in all_items if 0 < i['quantity'] <= i['min_stock'])
     healthy_count   = sum(1 for i in all_items if i['quantity'] > i['min_stock'])
 
+    # Build items_json grouped by box_id — passed as a single safe JSON blob
+    import json
+    items_by_box = {}
+    for item in all_items:
+        bid = item['box_id']
+        if bid not in items_by_box:
+            items_by_box[bid] = []
+        qty = item['quantity']
+        min_s = item['min_stock']
+        if qty == 0:
+            status = 'out'
+        elif qty <= min_s:
+            status = 'low'
+        else:
+            status = 'ok'
+        items_by_box[bid].append({
+            'id':          item['id'],
+            'name':        item['item_name'] or '',
+            'description': item['description'] or '',
+            'quantity':    qty,
+            'min_stock':   min_s,
+            'box_id':      bid,
+            'column_id':   item['column_id'],
+            'status':      status,
+        })
+
     conn.close()
     return render_template('inventory.html',
         items=all_items,
+        items_json=json.dumps(items_by_box),
         boxes_with_stats=boxes_with_stats,
         all_columns=all_columns,
         all_boxes=all_boxes,
@@ -1498,7 +1525,6 @@ def inventory():
         low_stock_count=low_stock_count,
         healthy_count=healthy_count
     )
-
 # ─── API: SCANNER ENDPOINTS ───────────────────────────────────────────────────
 
 @app.route('/api/column/<int:column_id>/boxes')
