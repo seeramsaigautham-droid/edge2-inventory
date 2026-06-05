@@ -136,49 +136,38 @@
 </div>
 
 {% if session.get('role') in ('admin', 'storekeeper') %}
-
-<!-- ═══════════════════════════════════════════════════
-     ADD ITEM MODAL — box & column locked per row click
-     ═══════════════════════════════════════════════════ -->
+<!-- ADD ITEM MODAL -->
 <div id="add-item-modal" class="modal-overlay">
   <div class="modal-box" style="max-width:480px;width:100%;">
-
-    <!-- Header -->
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
       <div class="modal-title" style="margin:0;">Add Item</div>
       <button onclick="closeAddItemModal()"
         style="background:none;border:none;color:var(--text-muted);font-size:1.25rem;cursor:pointer;line-height:1;padding:4px;">✕</button>
     </div>
-
     <!-- Locked location display -->
-    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;margin-bottom:20px;display:flex;gap:20px;">
+    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;margin-bottom:20px;display:flex;gap:20px;align-items:center;">
       <div>
         <div style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px;">Column</div>
         <div id="modal-column-name" style="font-weight:600;color:var(--text);font-size:0.9rem;">—</div>
       </div>
-      <div style="width:1px;background:var(--border);"></div>
+      <div style="width:1px;height:32px;background:var(--border);"></div>
       <div>
         <div style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px;">Box</div>
         <div id="modal-box-name" style="font-weight:600;color:var(--accent);font-size:0.9rem;">—</div>
       </div>
-      <div style="margin-left:auto;display:flex;align-items:center;">
+      <div style="margin-left:auto;">
         <span style="font-size:0.7rem;color:var(--text-dim);background:var(--bg);border:1px solid var(--border2);border-radius:4px;padding:2px 7px;">locked</span>
       </div>
     </div>
-
-    <!-- Form — POSTs to /items/add, hidden box_id + next=/inventory -->
     <form id="add-item-form" method="POST" action="/items/add">
-      <input type="hidden" name="box_id"  id="modal-box-id">
-      <input type="hidden" name="next"    value="/inventory">
-
+      <input type="hidden" name="box_id" id="modal-box-id">
+      <input type="hidden" name="next"   value="/inventory">
       <div id="add-item-error" class="alert alert-error" style="display:none;margin-bottom:14px;"></div>
-
       <div class="form-group">
         <label for="modal-item-name">Item Name <span style="color:var(--danger)">*</span></label>
         <input type="text" id="modal-item-name" name="item_name"
           placeholder="e.g. Arduino Uno" required autocomplete="off">
       </div>
-
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
         <div class="form-group">
           <label for="modal-quantity">Initial Quantity <span style="color:var(--danger)">*</span></label>
@@ -190,13 +179,11 @@
           <small style="color:var(--text-muted);">Alert threshold</small>
         </div>
       </div>
-
       <div class="form-group">
         <label for="modal-description">Description <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
         <input type="text" id="modal-description" name="description"
           placeholder="e.g. ATmega328P based dev board">
       </div>
-
       <div class="modal-actions" style="margin-top:20px;">
         <button type="button" class="btn btn-secondary" onclick="closeAddItemModal()">Cancel</button>
         <button type="submit" class="btn btn-primary" id="add-item-submit-btn">Save Item</button>
@@ -205,7 +192,7 @@
   </div>
 </div>
 
-<!-- Restock Modal -->
+<!-- RESTOCK MODAL -->
 <div id="restock-modal" class="modal-overlay">
   <div class="modal-box">
     <div class="modal-title" id="restock-title">Restock Item</div>
@@ -224,110 +211,127 @@
     </div>
   </div>
 </div>
-
 {% endif %}
 {% endblock %}
 
 {% block scripts %}
 <script>
-  /* ── Embed items data from server for instant rendering ── */
-  const allItemsData = {
-    {% for box in boxes_with_stats %}
-    {{ box.id }}: [
-      {% for item in items if item.box_id == box.id %}
-      {
-        id: {{ item.id }},
-        name: {{ item.item_name | tojson }},
-        description: {{ (item.description or '') | tojson }},
-        quantity: {{ item.quantity }},
-        min_stock: {{ item.min_stock }},
-        box_id: {{ item.box_id }},
-        column_id: {{ item.column_id }},
-        status: {% if item.quantity == 0 %}'out'{% elif item.quantity <= item.min_stock %}'low'{% else %}'ok'{% endif %}
-      },
-      {% endfor %}
-    ],
-    {% endfor %}
-  };
+(function () {
+  /* ══════════════════════════════════════════════════════════════
+     BUILD allItemsData safely using a single tojson dump.
+     This avoids ALL Jinja-inside-JS escaping issues.
+  ══════════════════════════════════════════════════════════════ */
+  const rawItems = {{ items | map(attribute='__dict__', default=[]) | list | tojson if false else
+    '['
+    ~ items | map(attribute='id')           | list | zip(
+       items | map(attribute='item_name')   | list,
+       items | map(attribute='description') | list,
+       items | map(attribute='quantity')    | list,
+       items | map(attribute='min_stock')   | list,
+       items | map(attribute='box_id')      | list,
+       items | map(attribute='column_id')   | list
+    ) | list | tojson
+    ~ ']'
+  }};
+
+  /* Rebuild as {box_id: [items]} map the safe way — all via Jinja tojson */
+  const _itemRows = {{ items | map('list') | list | tojson }};
+  /* _itemRows is unused fallback; use the explicit approach below */
+
+  /* ── Safe single-shot data embed ── */
+  const allItemsData = {};
+  {% for box in boxes_with_stats %}
+  allItemsData[{{ box.id }}] = [];
+  {% endfor %}
+  {% for item in items %}
+  (function(){
+    var entry = {
+      id:          {{ item.id }},
+      name:        {{ item.item_name  | tojson }},
+      description: {{ (item.description or '') | tojson }},
+      quantity:    {{ item.quantity }},
+      min_stock:   {{ item.min_stock }},
+      box_id:      {{ item.box_id }},
+      column_id:   {{ item.column_id }},
+      status:      {{ 'out' | tojson if item.quantity == 0 else ('low' | tojson if item.quantity <= item.min_stock else 'ok' | tojson) }}
+    };
+    if (allItemsData[entry.box_id]) allItemsData[entry.box_id].push(entry);
+  })();
+  {% endfor %}
 
   const isPrivileged = {{ 'true' if session.get('role') in ('admin', 'storekeeper') else 'false' }};
-  const isAdmin = {{ 'true' if session.get('role') == 'admin' else 'false' }};
+  const isAdmin      = {{ 'true' if session.get('role') == 'admin' else 'false' }};
 
   /* ══════════════════════════════════════════
      ADD ITEM MODAL
   ══════════════════════════════════════════ */
   function openAddItemModal(boxId, columnId, boxName, columnName) {
-    // Fill locked display
+    var modal = document.getElementById('add-item-modal');
+    if (!modal) return;
     document.getElementById('modal-box-name').textContent    = boxName;
     document.getElementById('modal-column-name').textContent = columnName;
-
-    // Set hidden box_id so the form POSTs the right value
-    document.getElementById('modal-box-id').value = boxId;
-
-    // Reset all fields
-    document.getElementById('modal-item-name').value   = '';
-    document.getElementById('modal-quantity').value    = '0';
-    document.getElementById('modal-min-stock').value   = '5';
-    document.getElementById('modal-description').value = '';
-    document.getElementById('add-item-error').style.display = 'none';
-
-    document.getElementById('add-item-modal').classList.add('open');
-    setTimeout(() => document.getElementById('modal-item-name').focus(), 80);
+    document.getElementById('modal-box-id').value            = boxId;
+    document.getElementById('modal-item-name').value         = '';
+    document.getElementById('modal-quantity').value          = '0';
+    document.getElementById('modal-min-stock').value         = '5';
+    document.getElementById('modal-description').value       = '';
+    document.getElementById('add-item-error').style.display  = 'none';
+    modal.classList.add('open');
+    setTimeout(function(){ document.getElementById('modal-item-name').focus(); }, 80);
   }
+  window.openAddItemModal = openAddItemModal;
 
   function closeAddItemModal() {
-    document.getElementById('add-item-modal').classList.remove('open');
+    var modal = document.getElementById('add-item-modal');
+    if (modal) modal.classList.remove('open');
+  }
+  window.closeAddItemModal = closeAddItemModal;
+
+  var addModal = document.getElementById('add-item-modal');
+  if (addModal) {
+    addModal.addEventListener('click', function(e){ if (e.target === this) closeAddItemModal(); });
   }
 
-  // Close on backdrop click
-  document.getElementById('add-item-modal') && document.getElementById('add-item-modal').addEventListener('click', function(e) {
-    if (e.target === this) closeAddItemModal();
-  });
-
-  // Close on Escape key
-  document.addEventListener('keydown', function(e) {
-    if (e.key === 'Escape') {
-      closeAddItemModal();
-      closeRestock();
-    }
-  });
-
-  /* ── Column filter ── */
+  /* ══════════════════════════════════════════
+     COLUMN FILTER
+  ══════════════════════════════════════════ */
   function applyColumnFilter() {
-    const colId   = document.getElementById('filter-column').value;
-    const boxRows = document.querySelectorAll('.box-row');
-    const subRows = document.querySelectorAll('.items-subrow');
-    let visible   = 0;
+    var colId   = document.getElementById('filter-column').value;
+    var boxRows = document.querySelectorAll('.box-row');
+    var subRows = document.querySelectorAll('.items-subrow');
+    var visible = 0;
 
-    boxRows.forEach(row => {
-      const show = !colId || row.dataset.columnId === colId;
+    boxRows.forEach(function(row){
+      var show = !colId || row.dataset.columnId === colId;
       row.style.display = show ? '' : 'none';
-      visible += show ? 1 : 0;
+      if (show) visible++;
     });
-    subRows.forEach(row => { row.style.display = 'none'; });
-
-    document.querySelectorAll('[id^="toggle-btn-"]').forEach(btn => {
+    subRows.forEach(function(row){ row.style.display = 'none'; });
+    document.querySelectorAll('[id^="toggle-btn-"]').forEach(function(btn){
       btn.textContent = 'View Items';
       btn.classList.remove('btn-primary');
       btn.classList.add('btn-secondary');
     });
 
-    const tableWrap  = document.querySelector('.table-wrap');
-    const emptyState = document.getElementById('empty-state');
-    tableWrap.style.display  = visible === 0 ? 'none' : '';
-    emptyState.style.display = visible === 0 ? 'flex'  : 'none';
+    var tableWrap  = document.querySelector('.table-wrap');
+    var emptyState = document.getElementById('empty-state');
+    if (tableWrap)  tableWrap.style.display  = visible === 0 ? 'none' : '';
+    if (emptyState) emptyState.style.display = visible === 0 ? 'flex'  : 'none';
   }
+  window.applyColumnFilter = applyColumnFilter;
 
   function clearFilters() {
     document.getElementById('filter-column').value = '';
     applyColumnFilter();
   }
+  window.clearFilters = clearFilters;
 
-  /* ── Toggle items sub-row ── */
+  /* ══════════════════════════════════════════
+     TOGGLE ITEMS SUB-ROW
+  ══════════════════════════════════════════ */
   function toggleItems(boxId, btn) {
-    const subRow = document.getElementById('items-row-' + boxId);
-    const isOpen = subRow.style.display !== 'none';
-
+    var subRow = document.getElementById('items-row-' + boxId);
+    var isOpen = subRow.style.display !== 'none';
     if (isOpen) {
       subRow.style.display = 'none';
       btn.textContent = 'View Items';
@@ -335,89 +339,76 @@
       btn.classList.add('btn-secondary');
       return;
     }
-
     subRow.style.display = '';
     btn.textContent = 'Hide Items';
     btn.classList.remove('btn-secondary');
     btn.classList.add('btn-primary');
     renderItems(boxId);
   }
+  window.toggleItems = toggleItems;
 
   function renderItems(boxId) {
-    const container = document.getElementById('items-container-' + boxId);
-    const items     = allItemsData[boxId] || [];
+    var container = document.getElementById('items-container-' + boxId);
+    var items     = allItemsData[boxId] || [];
 
     if (items.length === 0) {
-      // Find box/column name from the row
-      const boxRow    = document.querySelector(`.box-row[data-box-id="${boxId}"]`);
-      const boxName   = boxRow ? boxRow.querySelector('td span[style*="font-weight"]').textContent.trim() : '';
-      const colBadge  = boxRow ? boxRow.querySelector('.badge-info').textContent.trim() : '';
-
-      container.innerHTML = `
-        <div class="empty-state" style="padding:20px 0;border:none;background:none;">
-          <div class="empty-icon" style="font-size:1.5rem;">📦</div>
-          <div class="empty-title" style="font-size:0.95rem;">No items in this box yet</div>
-          ${isPrivileged
-            ? `<button class="btn btn-primary btn-sm" style="margin-top:10px;"
-                 onclick="openAddItemModal(${boxId}, '', ${JSON.stringify(boxName)}, ${JSON.stringify(colBadge)})">
-                 + Add Item
-               </button>`
-            : ''}
-        </div>`;
+      var boxRow  = document.querySelector('.box-row[data-box-id="' + boxId + '"]');
+      var bName   = boxRow ? boxRow.querySelector('td span[style*="font-weight"]').textContent.trim() : '';
+      var cName   = boxRow ? boxRow.querySelector('.badge-info').textContent.trim() : '';
+      container.innerHTML =
+        '<div class="empty-state" style="padding:20px 0;border:none;background:none;">' +
+          '<div class="empty-icon" style="font-size:1.5rem;">📦</div>' +
+          '<div class="empty-title" style="font-size:0.95rem;">No items in this box yet</div>' +
+          (isPrivileged
+            ? '<button class="btn btn-primary btn-sm" style="margin-top:10px;" ' +
+                'onclick="openAddItemModal(' + boxId + ', \'\', ' + JSON.stringify(bName) + ', ' + JSON.stringify(cName) + ')">+ Add Item</button>'
+            : '') +
+        '</div>';
       return;
     }
 
-    const statusLabel = { out: 'Out of Stock', low: 'Low Stock', ok: 'Healthy' };
-    const statusClass = { out: 'badge-danger',  low: 'badge-warning',  ok: 'badge-success' };
-    const qtyColor    = { out: 'var(--danger)',  low: 'var(--warning)', ok: 'var(--text)' };
+    var statusLabel = { out: 'Out of Stock', low: 'Low Stock', ok: 'Healthy' };
+    var statusClass = { out: 'badge-danger',  low: 'badge-warning', ok: 'badge-success' };
+    var qtyColor    = { out: 'var(--danger)', low: 'var(--warning)', ok: 'var(--text)' };
 
-    const rows = items.map(item => `
-      <tr id="inv-row-${item.id}"
-        style="${item.status === 'out' ? 'border-left:3px solid var(--danger)' : item.status === 'low' ? 'border-left:3px solid var(--warning)' : ''}">
-        <td style="padding-left:12px;">
-          <div style="font-weight:600;color:var(--text);">${escHtml(item.name)}</div>
-          ${item.description ? `<div style="font-size:0.78rem;color:var(--text-muted);margin-top:2px;">${escHtml(item.description)}</div>` : ''}
-        </td>
-        <td>
-          <span id="qty-${item.id}" style="font-family:var(--mono);font-weight:700;color:${qtyColor[item.status]};">${item.quantity}</span>
-        </td>
-        <td style="color:var(--text-muted);font-family:var(--mono);">${item.min_stock}</td>
-        <td><span class="badge ${statusClass[item.status]}" id="badge-${item.id}">${statusLabel[item.status]}</span></td>
-        ${isPrivileged ? `
-        <td style="text-align:right;white-space:nowrap;">
-          <div style="display:flex;gap:6px;justify-content:flex-end;">
-            <button class="btn btn-success btn-sm"
-              data-item-id="${item.id}"
-              data-item-name="${escAttr(item.name)}"
-              data-item-qty="${item.quantity}"
-              onclick="openRestock(this)">Restock</button>
-            <a href="/items/edit/${item.id}" class="btn btn-secondary btn-sm">Edit</a>
-            ${isAdmin ? `
-            <form id="del-inv-${item.id}" method="POST" action="/items/delete/${item.id}" style="display:inline;">
-              <button type="button" class="btn btn-danger btn-sm"
-                onclick="openConfirm('Delete &quot;${escAttr(item.name)}&quot;? This cannot be undone.', 'del-inv-${item.id}')">
-                Delete
-              </button>
-            </form>` : ''}
-          </div>
-        </td>` : '<td></td>'}
-      </tr>`).join('');
+    var rows = items.map(function(item){
+      return '<tr id="inv-row-' + item.id + '" style="' +
+          (item.status === 'out' ? 'border-left:3px solid var(--danger)' :
+           item.status === 'low' ? 'border-left:3px solid var(--warning)' : '') + '">' +
+        '<td style="padding-left:12px;">' +
+          '<div style="font-weight:600;color:var(--text);">' + escHtml(item.name) + '</div>' +
+          (item.description ? '<div style="font-size:0.78rem;color:var(--text-muted);margin-top:2px;">' + escHtml(item.description) + '</div>' : '') +
+        '</td>' +
+        '<td><span id="qty-' + item.id + '" style="font-family:var(--mono);font-weight:700;color:' + qtyColor[item.status] + ';">' + item.quantity + '</span></td>' +
+        '<td style="color:var(--text-muted);font-family:var(--mono);">' + item.min_stock + '</td>' +
+        '<td><span class="badge ' + statusClass[item.status] + '" id="badge-' + item.id + '">' + statusLabel[item.status] + '</span></td>' +
+        (isPrivileged
+          ? '<td style="text-align:right;white-space:nowrap;"><div style="display:flex;gap:6px;justify-content:flex-end;">' +
+              '<button class="btn btn-success btn-sm" data-item-id="' + item.id + '" data-item-name="' + escAttr(item.name) + '" data-item-qty="' + item.quantity + '" onclick="openRestock(this)">Restock</button>' +
+              '<a href="/items/edit/' + item.id + '" class="btn btn-secondary btn-sm">Edit</a>' +
+              (isAdmin
+                ? '<form id="del-inv-' + item.id + '" method="POST" action="/items/delete/' + item.id + '" style="display:inline;">' +
+                    '<button type="button" class="btn btn-danger btn-sm" onclick="openConfirm(\'Delete &quot;' + escAttr(item.name) + '&quot;? This cannot be undone.\', \'del-inv-' + item.id + '\')">Delete</button>' +
+                  '</form>'
+                : '') +
+            '</div></td>'
+          : '<td></td>') +
+      '</tr>';
+    }).join('');
 
-    container.innerHTML = `
-      <div style="border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;margin-top:4px;">
-        <table style="margin:0;">
-          <thead>
-            <tr style="background:var(--surface2);">
-              <th style="padding-left:12px;">Item</th>
-              <th>Quantity</th>
-              <th>Min Stock</th>
-              <th>Status</th>
-              ${isPrivileged ? '<th style="text-align:right;">Actions</th>' : '<th></th>'}
-            </tr>
-          </thead>
-          <tbody>${rows}</tbody>
-        </table>
-      </div>`;
+    container.innerHTML =
+      '<div style="border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;margin-top:4px;">' +
+        '<table style="margin:0;">' +
+          '<thead><tr style="background:var(--surface2);">' +
+            '<th style="padding-left:12px;">Item</th>' +
+            '<th>Quantity</th>' +
+            '<th>Min Stock</th>' +
+            '<th>Status</th>' +
+            (isPrivileged ? '<th style="text-align:right;">Actions</th>' : '<th></th>') +
+          '</tr></thead>' +
+          '<tbody>' + rows + '</tbody>' +
+        '</table>' +
+      '</div>';
   }
 
   function escHtml(str) {
@@ -427,28 +418,45 @@
     return String(str).replace(/"/g,'&quot;').replace(/'/g,'&#39;');
   }
 
-  /* ── Restock Modal ── */
-  let restockItemId = null;
+  /* ══════════════════════════════════════════
+     RESTOCK MODAL
+  ══════════════════════════════════════════ */
+  var restockItemId = null;
 
   function openRestock(btn) {
+    var modal = document.getElementById('restock-modal');
+    if (!modal) return;
     restockItemId = btn.dataset.itemId;
     document.getElementById('restock-title').textContent   = 'Restock — ' + btn.dataset.itemName;
     document.getElementById('restock-current').textContent = btn.dataset.itemQty;
     document.getElementById('restock-qty').value           = 1;
     document.getElementById('restock-error').style.display = 'none';
-    document.getElementById('restock-modal').classList.add('open');
-    setTimeout(() => document.getElementById('restock-qty').focus(), 50);
+    modal.classList.add('open');
+    setTimeout(function(){ document.getElementById('restock-qty').focus(); }, 50);
   }
+  window.openRestock = openRestock;
 
   function closeRestock() {
-    document.getElementById('restock-modal').classList.remove('open');
+    var modal = document.getElementById('restock-modal');
+    if (modal) modal.classList.remove('open');
     restockItemId = null;
   }
+  window.closeRestock = closeRestock;
+
+  var restockModal = document.getElementById('restock-modal');
+  if (restockModal) {
+    restockModal.addEventListener('click', function(e){ if (e.target === this) closeRestock(); });
+  }
+
+  /* Escape closes any open modal */
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'Escape') { closeAddItemModal(); closeRestock(); }
+  });
 
   async function confirmRestock() {
-    const qty   = parseInt(document.getElementById('restock-qty').value, 10);
-    const errEl = document.getElementById('restock-error');
-    const btn   = document.getElementById('restock-confirm-btn');
+    var qty   = parseInt(document.getElementById('restock-qty').value, 10);
+    var errEl = document.getElementById('restock-error');
+    var btn   = document.getElementById('restock-confirm-btn');
     errEl.style.display = 'none';
 
     if (!qty || qty < 1) {
@@ -456,63 +464,52 @@
       errEl.style.display = 'block';
       return;
     }
-
     setLoading(btn, true, 'Restocking…');
-
     try {
-      const res  = await fetch('/api/restock', {
+      var res  = await fetch('/api/restock', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ item_id: parseInt(restockItemId, 10), quantity: qty })
       });
-      const data = await res.json();
-
+      var data = await res.json();
       if (data.success) {
-        const newQty  = data.new_quantity;
-        const qtyEl   = document.getElementById('qty-' + restockItemId);
-        const badgeEl = document.getElementById('badge-' + restockItemId);
-        const row     = document.getElementById('inv-row-' + restockItemId);
-
-        let minStock = 0;
-        for (const boxId in allItemsData) {
-          const found = allItemsData[boxId].find(i => String(i.id) === String(restockItemId));
+        var newQty  = data.new_quantity;
+        var qtyEl   = document.getElementById('qty-'   + restockItemId);
+        var badgeEl = document.getElementById('badge-' + restockItemId);
+        var row     = document.getElementById('inv-row-' + restockItemId);
+        var minStock = 0;
+        for (var bid in allItemsData) {
+          var found = allItemsData[bid].find(function(i){ return String(i.id) === String(restockItemId); });
           if (found) { minStock = found.min_stock; found.quantity = newQty; break; }
         }
-
-        const newStatus = newQty === 0 ? 'out' : (newQty <= minStock ? 'low' : 'ok');
-        const colorMap  = { out: 'var(--danger)', low: 'var(--warning)', ok: 'var(--text)' };
-        const classMap  = { out: 'badge badge-danger', low: 'badge badge-warning', ok: 'badge badge-success' };
-        const textMap   = { out: 'Out of Stock', low: 'Low Stock', ok: 'Healthy' };
-
+        var newStatus = newQty === 0 ? 'out' : (newQty <= minStock ? 'low' : 'ok');
+        var colorMap  = { out:'var(--danger)', low:'var(--warning)', ok:'var(--text)' };
+        var classMap  = { out:'badge badge-danger', low:'badge badge-warning', ok:'badge badge-success' };
+        var textMap   = { out:'Out of Stock', low:'Low Stock', ok:'Healthy' };
         if (qtyEl) {
           qtyEl.textContent = newQty;
           qtyEl.style.color = 'var(--success)';
-          setTimeout(() => { qtyEl.style.transition = 'color 0.8s'; qtyEl.style.color = colorMap[newStatus]; }, 600);
+          setTimeout(function(){ qtyEl.style.transition = 'color 0.8s'; qtyEl.style.color = colorMap[newStatus]; }, 600);
         }
         if (badgeEl) { badgeEl.className = classMap[newStatus]; badgeEl.textContent = textMap[newStatus]; }
-        if (row) {
-          row.style.borderLeft = newStatus === 'out' ? '3px solid var(--danger)'
-                               : newStatus === 'low' ? '3px solid var(--warning)' : '';
-        }
-        const restockBtn = document.querySelector(`[data-item-id="${restockItemId}"]`);
+        if (row)     { row.style.borderLeft = newStatus === 'out' ? '3px solid var(--danger)' : newStatus === 'low' ? '3px solid var(--warning)' : ''; }
+        var restockBtn = document.querySelector('[data-item-id="' + restockItemId + '"]');
         if (restockBtn) restockBtn.dataset.itemQty = newQty;
-
         closeRestock();
         showToast('Restocked successfully.', 'success');
       } else {
         errEl.textContent = data.error || 'Restock failed.';
         errEl.style.display = 'block';
       }
-    } catch (e) {
+    } catch(e) {
       errEl.textContent = 'Network error. Please try again.';
       errEl.style.display = 'block';
     } finally {
       setLoading(btn, false);
     }
   }
+  window.confirmRestock = confirmRestock;
 
-  document.getElementById('restock-modal') && document.getElementById('restock-modal').addEventListener('click', function(e) {
-    if (e.target === this) closeRestock();
-  });
+})();
 </script>
 {% endblock %}
