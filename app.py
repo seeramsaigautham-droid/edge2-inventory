@@ -1488,6 +1488,7 @@ def inventory():
     healthy_count   = sum(1 for i in all_items if i['quantity'] > i['min_stock'])
 
     # Build items_json grouped by box_id — passed as a single safe JSON blob
+    # Build items_json grouped by box_id — passed as a single safe JSON blob
     import json
     items_by_box = {}
     for item in all_items:
@@ -1525,6 +1526,7 @@ def inventory():
         low_stock_count=low_stock_count,
         healthy_count=healthy_count
     )
+    
 # ─── API: SCANNER ENDPOINTS ───────────────────────────────────────────────────
 
 @app.route('/api/column/<int:column_id>/boxes')
