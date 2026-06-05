@@ -9,7 +9,6 @@
     <h2>Inventory</h2>
     <p style="color:var(--text-muted);font-size:0.875rem;margin-top:4px;">Unified view of all items</p>
   </div>
-  {# + Add Item button removed from here — it now lives in each box row #}
 </div>
 
 <!-- Summary Stats -->
@@ -91,24 +90,18 @@
           </td>
           <td style="white-space:nowrap;">
             <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-
-              <!-- Toggle expand/collapse items -->
               <button class="btn btn-secondary btn-sm"
                 onclick="toggleItems({{ box.id }}, this)"
                 id="toggle-btn-{{ box.id }}">
                 View Items
               </button>
-
               {% if session.get('role') in ('admin', 'storekeeper') %}
-              <!-- ✅ Add Item button — pre-selects this box, returns to /inventory after save -->
-              <a href="{{ url_for('add_item') }}?box_id={{ box.id }}&next={{ request.path }}"
-                 class="btn btn-primary btn-sm">
+              <button class="btn btn-primary btn-sm"
+                onclick="openAddItemModal({{ box.id }}, {{ box.column_id }}, {{ box.box_name | tojson }}, {{ box.column_name | tojson }})">
                 + Add Item
-              </a>
-
+              </button>
               <a href="{{ url_for('edit_box', box_id=box.id) }}" class="btn btn-secondary btn-sm">Edit</a>
               {% endif %}
-
               {% if session.get('role') == 'admin' %}
               <form id="del-box-{{ box.id }}" method="POST" action="{{ url_for('delete_box', box_id=box.id) }}" style="display:inline;">
                 <button type="button" class="btn btn-danger btn-sm"
@@ -117,7 +110,6 @@
                 </button>
               </form>
               {% endif %}
-
             </div>
           </td>
         </tr>
@@ -144,6 +136,75 @@
 </div>
 
 {% if session.get('role') in ('admin', 'storekeeper') %}
+
+<!-- ═══════════════════════════════════════════════════
+     ADD ITEM MODAL — box & column locked per row click
+     ═══════════════════════════════════════════════════ -->
+<div id="add-item-modal" class="modal-overlay">
+  <div class="modal-box" style="max-width:480px;width:100%;">
+
+    <!-- Header -->
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+      <div class="modal-title" style="margin:0;">Add Item</div>
+      <button onclick="closeAddItemModal()"
+        style="background:none;border:none;color:var(--text-muted);font-size:1.25rem;cursor:pointer;line-height:1;padding:4px;">✕</button>
+    </div>
+
+    <!-- Locked location display -->
+    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;margin-bottom:20px;display:flex;gap:20px;">
+      <div>
+        <div style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px;">Column</div>
+        <div id="modal-column-name" style="font-weight:600;color:var(--text);font-size:0.9rem;">—</div>
+      </div>
+      <div style="width:1px;background:var(--border);"></div>
+      <div>
+        <div style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px;">Box</div>
+        <div id="modal-box-name" style="font-weight:600;color:var(--accent);font-size:0.9rem;">—</div>
+      </div>
+      <div style="margin-left:auto;display:flex;align-items:center;">
+        <span style="font-size:0.7rem;color:var(--text-dim);background:var(--bg);border:1px solid var(--border2);border-radius:4px;padding:2px 7px;">locked</span>
+      </div>
+    </div>
+
+    <!-- Form — POSTs to /items/add, hidden box_id + next=/inventory -->
+    <form id="add-item-form" method="POST" action="/items/add">
+      <input type="hidden" name="box_id"  id="modal-box-id">
+      <input type="hidden" name="next"    value="/inventory">
+
+      <div id="add-item-error" class="alert alert-error" style="display:none;margin-bottom:14px;"></div>
+
+      <div class="form-group">
+        <label for="modal-item-name">Item Name <span style="color:var(--danger)">*</span></label>
+        <input type="text" id="modal-item-name" name="item_name"
+          placeholder="e.g. Arduino Uno" required autocomplete="off">
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+        <div class="form-group">
+          <label for="modal-quantity">Initial Quantity <span style="color:var(--danger)">*</span></label>
+          <input type="number" id="modal-quantity" name="quantity" min="0" value="0" required>
+        </div>
+        <div class="form-group">
+          <label for="modal-min-stock">Min Stock <span style="color:var(--danger)">*</span></label>
+          <input type="number" id="modal-min-stock" name="min_stock" min="0" value="5" required>
+          <small style="color:var(--text-muted);">Alert threshold</small>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="modal-description">Description <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
+        <input type="text" id="modal-description" name="description"
+          placeholder="e.g. ATmega328P based dev board">
+      </div>
+
+      <div class="modal-actions" style="margin-top:20px;">
+        <button type="button" class="btn btn-secondary" onclick="closeAddItemModal()">Cancel</button>
+        <button type="submit" class="btn btn-primary" id="add-item-submit-btn">Save Item</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <!-- Restock Modal -->
 <div id="restock-modal" class="modal-overlay">
   <div class="modal-box">
@@ -163,6 +224,7 @@
     </div>
   </div>
 </div>
+
 {% endif %}
 {% endblock %}
 
@@ -191,32 +253,69 @@
   const isPrivileged = {{ 'true' if session.get('role') in ('admin', 'storekeeper') else 'false' }};
   const isAdmin = {{ 'true' if session.get('role') == 'admin' else 'false' }};
 
+  /* ══════════════════════════════════════════
+     ADD ITEM MODAL
+  ══════════════════════════════════════════ */
+  function openAddItemModal(boxId, columnId, boxName, columnName) {
+    // Fill locked display
+    document.getElementById('modal-box-name').textContent    = boxName;
+    document.getElementById('modal-column-name').textContent = columnName;
+
+    // Set hidden box_id so the form POSTs the right value
+    document.getElementById('modal-box-id').value = boxId;
+
+    // Reset all fields
+    document.getElementById('modal-item-name').value   = '';
+    document.getElementById('modal-quantity').value    = '0';
+    document.getElementById('modal-min-stock').value   = '5';
+    document.getElementById('modal-description').value = '';
+    document.getElementById('add-item-error').style.display = 'none';
+
+    document.getElementById('add-item-modal').classList.add('open');
+    setTimeout(() => document.getElementById('modal-item-name').focus(), 80);
+  }
+
+  function closeAddItemModal() {
+    document.getElementById('add-item-modal').classList.remove('open');
+  }
+
+  // Close on backdrop click
+  document.getElementById('add-item-modal') && document.getElementById('add-item-modal').addEventListener('click', function(e) {
+    if (e.target === this) closeAddItemModal();
+  });
+
+  // Close on Escape key
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+      closeAddItemModal();
+      closeRestock();
+    }
+  });
+
   /* ── Column filter ── */
   function applyColumnFilter() {
-    const colId = document.getElementById('filter-column').value;
-    const boxRows  = document.querySelectorAll('.box-row');
-    const subRows  = document.querySelectorAll('.items-subrow');
-    let visible = 0;
+    const colId   = document.getElementById('filter-column').value;
+    const boxRows = document.querySelectorAll('.box-row');
+    const subRows = document.querySelectorAll('.items-subrow');
+    let visible   = 0;
 
     boxRows.forEach(row => {
       const show = !colId || row.dataset.columnId === colId;
       row.style.display = show ? '' : 'none';
       visible += show ? 1 : 0;
     });
-    subRows.forEach(row => {
-      row.style.display = 'none'; // collapse on filter change
-    });
-    // Re-collapse all toggle buttons when filter changes
+    subRows.forEach(row => { row.style.display = 'none'; });
+
     document.querySelectorAll('[id^="toggle-btn-"]').forEach(btn => {
       btn.textContent = 'View Items';
       btn.classList.remove('btn-primary');
       btn.classList.add('btn-secondary');
     });
 
-    const tableWrap = document.querySelector('.table-wrap');
+    const tableWrap  = document.querySelector('.table-wrap');
     const emptyState = document.getElementById('empty-state');
-    tableWrap.style.display = visible === 0 ? 'none' : '';
-    emptyState.style.display = visible === 0 ? 'flex' : 'none';
+    tableWrap.style.display  = visible === 0 ? 'none' : '';
+    emptyState.style.display = visible === 0 ? 'flex'  : 'none';
   }
 
   function clearFilters() {
@@ -241,29 +340,36 @@
     btn.textContent = 'Hide Items';
     btn.classList.remove('btn-secondary');
     btn.classList.add('btn-primary');
-
     renderItems(boxId);
   }
 
   function renderItems(boxId) {
     const container = document.getElementById('items-container-' + boxId);
-    const items = allItemsData[boxId] || [];
+    const items     = allItemsData[boxId] || [];
 
     if (items.length === 0) {
+      // Find box/column name from the row
+      const boxRow    = document.querySelector(`.box-row[data-box-id="${boxId}"]`);
+      const boxName   = boxRow ? boxRow.querySelector('td span[style*="font-weight"]').textContent.trim() : '';
+      const colBadge  = boxRow ? boxRow.querySelector('.badge-info').textContent.trim() : '';
+
       container.innerHTML = `
         <div class="empty-state" style="padding:20px 0;border:none;background:none;">
           <div class="empty-icon" style="font-size:1.5rem;">📦</div>
           <div class="empty-title" style="font-size:0.95rem;">No items in this box yet</div>
           ${isPrivileged
-            ? `<a href="/items/add?box_id=${boxId}&next=/inventory" class="btn btn-primary btn-sm" style="margin-top:10px;">+ Add Item</a>`
+            ? `<button class="btn btn-primary btn-sm" style="margin-top:10px;"
+                 onclick="openAddItemModal(${boxId}, '', ${JSON.stringify(boxName)}, ${JSON.stringify(colBadge)})">
+                 + Add Item
+               </button>`
             : ''}
         </div>`;
       return;
     }
 
     const statusLabel = { out: 'Out of Stock', low: 'Low Stock', ok: 'Healthy' };
-    const statusClass = { out: 'badge-danger', low: 'badge-warning', ok: 'badge-success' };
-    const qtyColor    = { out: 'var(--danger)', low: 'var(--warning)', ok: 'var(--text)' };
+    const statusClass = { out: 'badge-danger',  low: 'badge-warning',  ok: 'badge-success' };
+    const qtyColor    = { out: 'var(--danger)',  low: 'var(--warning)', ok: 'var(--text)' };
 
     const rows = items.map(item => `
       <tr id="inv-row-${item.id}"
@@ -367,7 +473,6 @@
         const badgeEl = document.getElementById('badge-' + restockItemId);
         const row     = document.getElementById('inv-row-' + restockItemId);
 
-        // Find min_stock from allItemsData
         let minStock = 0;
         for (const boxId in allItemsData) {
           const found = allItemsData[boxId].find(i => String(i.id) === String(restockItemId));
@@ -384,15 +489,11 @@
           qtyEl.style.color = 'var(--success)';
           setTimeout(() => { qtyEl.style.transition = 'color 0.8s'; qtyEl.style.color = colorMap[newStatus]; }, 600);
         }
-        if (badgeEl) {
-          badgeEl.className   = classMap[newStatus];
-          badgeEl.textContent = textMap[newStatus];
-        }
+        if (badgeEl) { badgeEl.className = classMap[newStatus]; badgeEl.textContent = textMap[newStatus]; }
         if (row) {
           row.style.borderLeft = newStatus === 'out' ? '3px solid var(--danger)'
                                : newStatus === 'low' ? '3px solid var(--warning)' : '';
         }
-        // Update restock btn qty
         const restockBtn = document.querySelector(`[data-item-id="${restockItemId}"]`);
         if (restockBtn) restockBtn.dataset.itemQty = newQty;
 
