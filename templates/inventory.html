@@ -217,12 +217,10 @@
 {% block scripts %}
 <script>
 (function () {
+
   /* ══════════════════════════════════════════════════════════════
      BUILD allItemsData safely using a single tojson dump.
-     This avoids ALL Jinja-inside-JS escaping issues.
   ══════════════════════════════════════════════════════════════ */
-
-  /* ── Safe single-shot data embed ── */
   const allItemsData = {};
   {% for box in boxes_with_stats %}
   allItemsData[{{ box.id }}] = [];
@@ -336,18 +334,32 @@
     var items     = allItemsData[boxId] || [];
 
     if (items.length === 0) {
+      /* ── FIX: read box/column info from the DOM row, then attach
+         the click handler via addEventListener to avoid any
+         quote-escaping / SyntaxError from inline onclick strings. ── */
       var boxRow  = document.querySelector('.box-row[data-box-id="' + boxId + '"]');
       var bName   = boxRow ? boxRow.querySelector('td span[style*="font-weight"]').textContent.trim() : '';
       var cName   = boxRow ? boxRow.querySelector('.badge-info').textContent.trim() : '';
+      var colId   = boxRow ? boxRow.dataset.columnId : '';
+
       container.innerHTML =
         '<div class="empty-state" style="padding:20px 0;border:none;background:none;">' +
           '<div class="empty-icon" style="font-size:1.5rem;">📦</div>' +
           '<div class="empty-title" style="font-size:0.95rem;">No items in this box yet</div>' +
           (isPrivileged
-            ? '<button class="btn btn-primary btn-sm" style="margin-top:10px;" ' +
-                'onclick="openAddItemModal(' + boxId + ', \'\', ' + JSON.stringify(bName) + ', ' + JSON.stringify(cName) + ')">+ Add Item</button>'
+            ? '<button class="btn btn-primary btn-sm" style="margin-top:10px;" id="empty-add-btn-' + boxId + '">+ Add Item</button>'
             : '') +
         '</div>';
+
+      /* Attach handler after innerHTML is set — no inline onclick needed */
+      if (isPrivileged) {
+        var emptyBtn = document.getElementById('empty-add-btn-' + boxId);
+        if (emptyBtn) {
+          emptyBtn.addEventListener('click', function () {
+            openAddItemModal(parseInt(boxId, 10), parseInt(colId, 10), bName, cName);
+          });
+        }
+      }
       return;
     }
 
@@ -431,8 +443,6 @@
   if (restockModal) {
     restockModal.addEventListener('click', function(e){ if (e.target === this) closeRestock(); });
   }
-
-  /* Escape is handled globally by base.html — no duplicate listener needed */
 
   async function confirmRestock() {
     var qty   = parseInt(document.getElementById('restock-qty').value, 10);
