@@ -221,22 +221,6 @@
      BUILD allItemsData safely using a single tojson dump.
      This avoids ALL Jinja-inside-JS escaping issues.
   ══════════════════════════════════════════════════════════════ */
-  const rawItems = {{ items | map(attribute='__dict__', default=[]) | list | tojson if false else
-    '['
-    ~ items | map(attribute='id')           | list | zip(
-       items | map(attribute='item_name')   | list,
-       items | map(attribute='description') | list,
-       items | map(attribute='quantity')    | list,
-       items | map(attribute='min_stock')   | list,
-       items | map(attribute='box_id')      | list,
-       items | map(attribute='column_id')   | list
-    ) | list | tojson
-    ~ ']'
-  }};
-
-  /* Rebuild as {box_id: [items]} map the safe way — all via Jinja tojson */
-  const _itemRows = {{ items | map('list') | list | tojson }};
-  /* _itemRows is unused fallback; use the explicit approach below */
 
   /* ── Safe single-shot data embed ── */
   const allItemsData = {};
