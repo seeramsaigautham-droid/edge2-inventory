@@ -9,6 +9,9 @@
     <h2>Inventory</h2>
     <p style="color:var(--text-muted);font-size:0.875rem;margin-top:4px;">Unified view of all items</p>
   </div>
+  {% if session.get('role') in ('admin', 'storekeeper') %}
+  <a href="{{ url_for('add_item') }}" class="btn btn-primary">+ Add Item</a>
+  {% endif %}
 </div>
 
 <!-- Summary Stats -->
@@ -89,7 +92,7 @@
             <span style="font-family:var(--mono);font-weight:700;color:var(--accent);">{{ box.total_quantity }}</span>
           </td>
           <td style="white-space:nowrap;">
-            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+            <div style="display:flex;gap:6px;align-items:center;">
               <button class="btn btn-secondary btn-sm"
                 onclick="toggleItems({{ box.id }}, this)"
                 id="toggle-btn-{{ box.id }}">
@@ -109,7 +112,6 @@
             </div>
           </td>
         </tr>
-
         <!-- Expandable items sub-row -->
         <tr class="items-subrow" id="items-row-{{ box.id }}" style="display:none;" data-column-id="{{ box.column_id }}">
           <td colspan="6" style="padding:0;background:var(--bg);border-top:none;">
@@ -132,7 +134,7 @@
 </div>
 
 {% if session.get('role') in ('admin', 'storekeeper') %}
-<!-- RESTOCK MODAL -->
+<!-- Restock Modal -->
 <div id="restock-modal" class="modal-overlay">
   <div class="modal-box">
     <div class="modal-title" id="restock-title">Restock Item</div>
@@ -156,49 +158,68 @@
 
 {% block scripts %}
 <script>
-(function () {
+  /* ── Embed items data from server for instant rendering ── */
+  const allItemsData = {
+    {% for box in boxes_with_stats %}
+    {{ box.id }}: [
+      {% for item in items if item.box_id == box.id %}
+      {
+        id: {{ item.id }},
+        name: {{ item.item_name | tojson }},
+        description: {{ (item.description or '') | tojson }},
+        quantity: {{ item.quantity }},
+        min_stock: {{ item.min_stock }},
+        box_id: {{ item.box_id }},
+        column_id: {{ item.column_id }},
+        status: {% if item.quantity == 0 %}'out'{% elif item.quantity <= item.min_stock %}'low'{% else %}'ok'{% endif %}
+      },
+      {% endfor %}
+    ],
+    {% endfor %}
+  };
 
-  var allItemsData = {{ items_json | safe }};
+  const isPrivileged = {{ 'true' if session.get('role') in ('admin', 'storekeeper') else 'false' }};
+  const isAdmin = {{ 'true' if session.get('role') == 'admin' else 'false' }};
 
-  var isPrivileged = {{ 'true' if session.get('role') in ('admin', 'storekeeper') else 'false' }};
-  var isAdmin      = {{ 'true' if session.get('role') == 'admin' else 'false' }};
-
-  /* ── COLUMN FILTER ── */
+  /* ── Column filter ── */
   function applyColumnFilter() {
-    var colId   = document.getElementById('filter-column').value;
-    var boxRows = document.querySelectorAll('.box-row');
-    var subRows = document.querySelectorAll('.items-subrow');
-    var visible = 0;
+    const colId = document.getElementById('filter-column').value;
+    const boxRows  = document.querySelectorAll('.box-row');
+    const subRows  = document.querySelectorAll('.items-subrow');
+    let visible = 0;
 
-    boxRows.forEach(function(row){
-      var show = !colId || row.dataset.columnId === colId;
+    boxRows.forEach(row => {
+      const show = !colId || row.dataset.columnId === colId;
       row.style.display = show ? '' : 'none';
-      if (show) visible++;
+      visible += show ? 1 : 0;
     });
-    subRows.forEach(function(row){ row.style.display = 'none'; });
-    document.querySelectorAll('[id^="toggle-btn-"]').forEach(function(btn){
+    subRows.forEach(row => {
+      const show = !colId || row.dataset.columnId === colId;
+      row.style.display = show ? 'none' : 'none'; // keep collapsed on filter change
+    });
+    // Re-collapse all toggles when filter changes
+    document.querySelectorAll('[id^="toggle-btn-"]').forEach(btn => {
       btn.textContent = 'View Items';
       btn.classList.remove('btn-primary');
       btn.classList.add('btn-secondary');
     });
 
-    var tableWrap  = document.querySelector('.table-wrap');
-    var emptyState = document.getElementById('empty-state');
-    if (tableWrap)  tableWrap.style.display  = visible === 0 ? 'none' : '';
-    if (emptyState) emptyState.style.display = visible === 0 ? 'flex'  : 'none';
+    const tableWrap = document.querySelector('.table-wrap');
+    const emptyState = document.getElementById('empty-state');
+    tableWrap.style.display = visible === 0 ? 'none' : '';
+    emptyState.style.display = visible === 0 ? 'flex' : 'none';
   }
-  window.applyColumnFilter = applyColumnFilter;
 
   function clearFilters() {
     document.getElementById('filter-column').value = '';
     applyColumnFilter();
   }
-  window.clearFilters = clearFilters;
 
-  /* ── TOGGLE ITEMS SUB-ROW ── */
+  /* ── Toggle items sub-row ── */
   function toggleItems(boxId, btn) {
-    var subRow = document.getElementById('items-row-' + boxId);
-    var isOpen = subRow.style.display !== 'none';
+    const subRow   = document.getElementById('items-row-' + boxId);
+    const isOpen   = subRow.style.display !== 'none';
+
     if (isOpen) {
       subRow.style.display = 'none';
       btn.textContent = 'View Items';
@@ -206,69 +227,80 @@
       btn.classList.add('btn-secondary');
       return;
     }
+
     subRow.style.display = '';
     btn.textContent = 'Hide Items';
     btn.classList.remove('btn-secondary');
     btn.classList.add('btn-primary');
+
     renderItems(boxId);
   }
-  window.toggleItems = toggleItems;
 
   function renderItems(boxId) {
-    var container = document.getElementById('items-container-' + boxId);
-    var items     = allItemsData[boxId] || [];
+    const container = document.getElementById('items-container-' + boxId);
+    const items = allItemsData[boxId] || [];
 
     if (items.length === 0) {
-      container.innerHTML =
-        '<div class="empty-state" style="padding:20px 0;border:none;background:none;">' +
-          '<div class="empty-icon" style="font-size:1.5rem;">📦</div>' +
-          '<div class="empty-title" style="font-size:0.95rem;">No items in this box yet</div>' +
-        '</div>';
+      container.innerHTML = `
+        <div class="empty-state" style="padding:20px 0;border:none;background:none;">
+          <div class="empty-icon" style="font-size:1.5rem;">📦</div>
+          <div class="empty-title" style="font-size:0.95rem;">No items in this box</div>
+          ${isPrivileged ? `<a href="/items/add" class="btn btn-primary btn-sm" style="margin-top:10px;">+ Add Item</a>` : ''}
+        </div>`;
       return;
     }
 
-    var statusLabel = { out: 'Out of Stock', low: 'Low Stock', ok: 'Healthy' };
-    var statusClass = { out: 'badge-danger',  low: 'badge-warning', ok: 'badge-success' };
-    var qtyColor    = { out: 'var(--danger)', low: 'var(--warning)', ok: 'var(--text)' };
+    const statusLabel = { out: 'Out of Stock', low: 'Low Stock', ok: 'Healthy' };
+    const statusClass = { out: 'badge-danger', low: 'badge-warning', ok: 'badge-success' };
+    const qtyColor    = { out: 'var(--danger)', low: 'var(--warning)', ok: 'var(--text)' };
 
-    var rows = items.map(function(item){
-      return '<tr id="inv-row-' + item.id + '" style="' +
-          (item.status === 'out' ? 'border-left:3px solid var(--danger)' :
-           item.status === 'low' ? 'border-left:3px solid var(--warning)' : '') + '">' +
-        '<td style="padding-left:12px;">' +
-          '<div style="font-weight:600;color:var(--text);">' + escHtml(item.name) + '</div>' +
-          (item.description ? '<div style="font-size:0.78rem;color:var(--text-muted);margin-top:2px;">' + escHtml(item.description) + '</div>' : '') +
-        '</td>' +
-        '<td><span id="qty-' + item.id + '" style="font-family:var(--mono);font-weight:700;color:' + qtyColor[item.status] + ';">' + item.quantity + '</span></td>' +
-        '<td style="color:var(--text-muted);font-family:var(--mono);">' + item.min_stock + '</td>' +
-        '<td><span class="badge ' + statusClass[item.status] + '" id="badge-' + item.id + '">' + statusLabel[item.status] + '</span></td>' +
-        (isPrivileged
-          ? '<td style="text-align:right;white-space:nowrap;"><div style="display:flex;gap:6px;justify-content:flex-end;">' +
-              '<button class="btn btn-success btn-sm" data-item-id="' + item.id + '" data-item-name="' + escAttr(item.name) + '" data-item-qty="' + item.quantity + '" onclick="openRestock(this)">Restock</button>' +
-              '<a href="/items/edit/' + item.id + '" class="btn btn-secondary btn-sm">Edit</a>' +
-              (isAdmin
-                ? '<form id="del-inv-' + item.id + '" method="POST" action="/items/delete/' + item.id + '" style="display:inline;">' +
-                    '<button type="button" class="btn btn-danger btn-sm" onclick="openConfirm(\'Delete &quot;' + escAttr(item.name) + '&quot;? This cannot be undone.\', \'del-inv-' + item.id + '\')">Delete</button>' +
-                  '</form>'
-                : '') +
-            '</div></td>'
-          : '<td></td>') +
-      '</tr>';
-    }).join('');
+    const rows = items.map(item => `
+      <tr id="inv-row-${item.id}"
+        style="${item.status === 'out' ? 'border-left:3px solid var(--danger)' : item.status === 'low' ? 'border-left:3px solid var(--warning)' : ''}">
+        <td style="padding-left:12px;">
+          <div style="font-weight:600;color:var(--text);">${escHtml(item.name)}</div>
+          ${item.description ? `<div style="font-size:0.78rem;color:var(--text-muted);margin-top:2px;">${escHtml(item.description)}</div>` : ''}
+        </td>
+        <td>
+          <span id="qty-${item.id}" style="font-family:var(--mono);font-weight:700;color:${qtyColor[item.status]};">${item.quantity}</span>
+        </td>
+        <td style="color:var(--text-muted);font-family:var(--mono);">${item.min_stock}</td>
+        <td><span class="badge ${statusClass[item.status]}" id="badge-${item.id}">${statusLabel[item.status]}</span></td>
+        ${isPrivileged ? `
+        <td style="text-align:right;white-space:nowrap;">
+          <div style="display:flex;gap:6px;justify-content:flex-end;">
+            <button class="btn btn-success btn-sm"
+              data-item-id="${item.id}"
+              data-item-name="${escAttr(item.name)}"
+              data-item-qty="${item.quantity}"
+              onclick="openRestock(this)">Restock</button>
+            <a href="/items/edit/${item.id}" class="btn btn-secondary btn-sm">Edit</a>
+            ${isAdmin ? `
+            <form id="del-inv-${item.id}" method="POST" action="/items/delete/${item.id}" style="display:inline;">
+              <button type="button" class="btn btn-danger btn-sm"
+                onclick="openConfirm('Delete &quot;${escAttr(item.name)}&quot;? This cannot be undone.', 'del-inv-${item.id}')">
+                Delete
+              </button>
+            </form>` : ''}
+          </div>
+        </td>` : '<td></td>'}
+      </tr>`).join('');
 
-    container.innerHTML =
-      '<div style="border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;margin-top:4px;">' +
-        '<table style="margin:0;">' +
-          '<thead><tr style="background:var(--surface2);">' +
-            '<th style="padding-left:12px;">Item</th>' +
-            '<th>Quantity</th>' +
-            '<th>Min Stock</th>' +
-            '<th>Status</th>' +
-            (isPrivileged ? '<th style="text-align:right;">Actions</th>' : '<th></th>') +
-          '</tr></thead>' +
-          '<tbody>' + rows + '</tbody>' +
-        '</table>' +
-      '</div>';
+    container.innerHTML = `
+      <div style="border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;margin-top:4px;">
+        <table style="margin:0;">
+          <thead>
+            <tr style="background:var(--surface2);">
+              <th style="padding-left:12px;">Item</th>
+              <th>Quantity</th>
+              <th>Min Stock</th>
+              <th>Status</th>
+              ${isPrivileged ? '<th style="text-align:right;">Actions</th>' : '<th></th>'}
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
   }
 
   function escHtml(str) {
@@ -278,38 +310,28 @@
     return String(str).replace(/"/g,'&quot;').replace(/'/g,'&#39;');
   }
 
-  /* ── RESTOCK MODAL ── */
-  var restockItemId = null;
+  /* ── Restock Modal ── */
+  let restockItemId = null;
 
   function openRestock(btn) {
-    var modal = document.getElementById('restock-modal');
-    if (!modal) return;
     restockItemId = btn.dataset.itemId;
     document.getElementById('restock-title').textContent   = 'Restock — ' + btn.dataset.itemName;
     document.getElementById('restock-current').textContent = btn.dataset.itemQty;
     document.getElementById('restock-qty').value           = 1;
     document.getElementById('restock-error').style.display = 'none';
-    modal.classList.add('open');
-    setTimeout(function(){ document.getElementById('restock-qty').focus(); }, 50);
+    document.getElementById('restock-modal').classList.add('open');
+    setTimeout(() => document.getElementById('restock-qty').focus(), 50);
   }
-  window.openRestock = openRestock;
 
   function closeRestock() {
-    var modal = document.getElementById('restock-modal');
-    if (modal) modal.classList.remove('open');
+    document.getElementById('restock-modal').classList.remove('open');
     restockItemId = null;
-  }
-  window.closeRestock = closeRestock;
-
-  var restockModal = document.getElementById('restock-modal');
-  if (restockModal) {
-    restockModal.addEventListener('click', function(e){ if (e.target === this) closeRestock(); });
   }
 
   async function confirmRestock() {
-    var qty   = parseInt(document.getElementById('restock-qty').value, 10);
-    var errEl = document.getElementById('restock-error');
-    var btn   = document.getElementById('restock-confirm-btn');
+    const qty   = parseInt(document.getElementById('restock-qty').value, 10);
+    const errEl = document.getElementById('restock-error');
+    const btn   = document.getElementById('restock-confirm-btn');
     errEl.style.display = 'none';
 
     if (!qty || qty < 1) {
@@ -317,52 +339,68 @@
       errEl.style.display = 'block';
       return;
     }
+
     setLoading(btn, true, 'Restocking…');
+
     try {
-      var res  = await fetch('/api/restock', {
+      const res  = await fetch('/api/restock', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ item_id: parseInt(restockItemId, 10), quantity: qty })
       });
-      var data = await res.json();
+      const data = await res.json();
+
       if (data.success) {
-        var newQty  = data.new_quantity;
-        var qtyEl   = document.getElementById('qty-'   + restockItemId);
-        var badgeEl = document.getElementById('badge-' + restockItemId);
-        var row     = document.getElementById('inv-row-' + restockItemId);
-        var minStock = 0;
-        for (var bid in allItemsData) {
-          var found = allItemsData[bid].find(function(i){ return String(i.id) === String(restockItemId); });
+        const newQty  = data.new_quantity;
+        const qtyEl   = document.getElementById('qty-' + restockItemId);
+        const badgeEl = document.getElementById('badge-' + restockItemId);
+        const row     = document.getElementById('inv-row-' + restockItemId);
+
+        // Find min_stock from allItemsData
+        let minStock = 0;
+        for (const boxId in allItemsData) {
+          const found = allItemsData[boxId].find(i => String(i.id) === String(restockItemId));
           if (found) { minStock = found.min_stock; found.quantity = newQty; break; }
         }
-        var newStatus = newQty === 0 ? 'out' : (newQty <= minStock ? 'low' : 'ok');
-        var colorMap  = { out:'var(--danger)', low:'var(--warning)', ok:'var(--text)' };
-        var classMap  = { out:'badge badge-danger', low:'badge badge-warning', ok:'badge badge-success' };
-        var textMap   = { out:'Out of Stock', low:'Low Stock', ok:'Healthy' };
+
+        const newStatus = newQty === 0 ? 'out' : (newQty <= minStock ? 'low' : 'ok');
+        const colorMap  = { out: 'var(--danger)', low: 'var(--warning)', ok: 'var(--text)' };
+        const classMap  = { out: 'badge badge-danger', low: 'badge badge-warning', ok: 'badge badge-success' };
+        const textMap   = { out: 'Out of Stock', low: 'Low Stock', ok: 'Healthy' };
+
         if (qtyEl) {
           qtyEl.textContent = newQty;
           qtyEl.style.color = 'var(--success)';
-          setTimeout(function(){ qtyEl.style.transition = 'color 0.8s'; qtyEl.style.color = colorMap[newStatus]; }, 600);
+          setTimeout(() => { qtyEl.style.transition = 'color 0.8s'; qtyEl.style.color = colorMap[newStatus]; }, 600);
         }
-        if (badgeEl) { badgeEl.className = classMap[newStatus]; badgeEl.textContent = textMap[newStatus]; }
-        if (row)     { row.style.borderLeft = newStatus === 'out' ? '3px solid var(--danger)' : newStatus === 'low' ? '3px solid var(--warning)' : ''; }
-        var restockBtn = document.querySelector('[data-item-id="' + restockItemId + '"]');
+        if (badgeEl) {
+          badgeEl.className   = classMap[newStatus];
+          badgeEl.textContent = textMap[newStatus];
+        }
+        if (row) {
+          row.style.borderLeft = newStatus === 'out' ? '3px solid var(--danger)'
+                               : newStatus === 'low' ? '3px solid var(--warning)' : '';
+        }
+        // Update restock btn qty
+        const restockBtn = document.querySelector(`[data-item-id="${restockItemId}"]`);
         if (restockBtn) restockBtn.dataset.itemQty = newQty;
+
         closeRestock();
         showToast('Restocked successfully.', 'success');
       } else {
         errEl.textContent = data.error || 'Restock failed.';
         errEl.style.display = 'block';
       }
-    } catch(e) {
+    } catch (e) {
       errEl.textContent = 'Network error. Please try again.';
       errEl.style.display = 'block';
     } finally {
       setLoading(btn, false);
     }
   }
-  window.confirmRestock = confirmRestock;
 
-})();
+  document.getElementById('restock-modal') && document.getElementById('restock-modal').addEventListener('click', function(e) {
+    if (e.target === this) closeRestock();
+  });
 </script>
 {% endblock %}
