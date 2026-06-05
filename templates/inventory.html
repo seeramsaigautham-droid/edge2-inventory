@@ -9,9 +9,7 @@
     <h2>Inventory</h2>
     <p style="color:var(--text-muted);font-size:0.875rem;margin-top:4px;">Unified view of all items</p>
   </div>
-  {% if session.get('role') in ('admin', 'storekeeper') %}
-  <a href="{{ url_for('add_item') }}" class="btn btn-primary">+ Add Item</a>
-  {% endif %}
+  {# + Add Item button removed from here — it now lives in each box row #}
 </div>
 
 <!-- Summary Stats -->
@@ -92,15 +90,25 @@
             <span style="font-family:var(--mono);font-weight:700;color:var(--accent);">{{ box.total_quantity }}</span>
           </td>
           <td style="white-space:nowrap;">
-            <div style="display:flex;gap:6px;align-items:center;">
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+
+              <!-- Toggle expand/collapse items -->
               <button class="btn btn-secondary btn-sm"
                 onclick="toggleItems({{ box.id }}, this)"
                 id="toggle-btn-{{ box.id }}">
                 View Items
               </button>
+
               {% if session.get('role') in ('admin', 'storekeeper') %}
+              <!-- ✅ Add Item button — pre-selects this box, returns to /inventory after save -->
+              <a href="{{ url_for('add_item') }}?box_id={{ box.id }}&next={{ request.path }}"
+                 class="btn btn-primary btn-sm">
+                + Add Item
+              </a>
+
               <a href="{{ url_for('edit_box', box_id=box.id) }}" class="btn btn-secondary btn-sm">Edit</a>
               {% endif %}
+
               {% if session.get('role') == 'admin' %}
               <form id="del-box-{{ box.id }}" method="POST" action="{{ url_for('delete_box', box_id=box.id) }}" style="display:inline;">
                 <button type="button" class="btn btn-danger btn-sm"
@@ -109,9 +117,11 @@
                 </button>
               </form>
               {% endif %}
+
             </div>
           </td>
         </tr>
+
         <!-- Expandable items sub-row -->
         <tr class="items-subrow" id="items-row-{{ box.id }}" style="display:none;" data-column-id="{{ box.column_id }}">
           <td colspan="6" style="padding:0;background:var(--bg);border-top:none;">
@@ -194,10 +204,9 @@
       visible += show ? 1 : 0;
     });
     subRows.forEach(row => {
-      const show = !colId || row.dataset.columnId === colId;
-      row.style.display = show ? 'none' : 'none'; // keep collapsed on filter change
+      row.style.display = 'none'; // collapse on filter change
     });
-    // Re-collapse all toggles when filter changes
+    // Re-collapse all toggle buttons when filter changes
     document.querySelectorAll('[id^="toggle-btn-"]').forEach(btn => {
       btn.textContent = 'View Items';
       btn.classList.remove('btn-primary');
@@ -217,8 +226,8 @@
 
   /* ── Toggle items sub-row ── */
   function toggleItems(boxId, btn) {
-    const subRow   = document.getElementById('items-row-' + boxId);
-    const isOpen   = subRow.style.display !== 'none';
+    const subRow = document.getElementById('items-row-' + boxId);
+    const isOpen = subRow.style.display !== 'none';
 
     if (isOpen) {
       subRow.style.display = 'none';
@@ -244,8 +253,10 @@
       container.innerHTML = `
         <div class="empty-state" style="padding:20px 0;border:none;background:none;">
           <div class="empty-icon" style="font-size:1.5rem;">📦</div>
-          <div class="empty-title" style="font-size:0.95rem;">No items in this box</div>
-          ${isPrivileged ? `<a href="/items/add" class="btn btn-primary btn-sm" style="margin-top:10px;">+ Add Item</a>` : ''}
+          <div class="empty-title" style="font-size:0.95rem;">No items in this box yet</div>
+          ${isPrivileged
+            ? `<a href="/items/add?box_id=${boxId}&next=/inventory" class="btn btn-primary btn-sm" style="margin-top:10px;">+ Add Item</a>`
+            : ''}
         </div>`;
       return;
     }

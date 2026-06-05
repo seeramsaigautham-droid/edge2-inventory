@@ -13,6 +13,7 @@
     <div class="alert alert-error" style="margin-bottom:16px;">{{ error }}</div>
     {% endif %}
     <form method="POST">
+       <input type="hidden" name="next" value="{{ request.args.get('next', '') }}"> 
       <div class="form-group">
         <label for="box_id">Box <span style="color:var(--danger)">*</span></label>
         <select id="box_id" name="box_id" required>
