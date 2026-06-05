@@ -432,10 +432,7 @@
     restockModal.addEventListener('click', function(e){ if (e.target === this) closeRestock(); });
   }
 
-  /* Escape closes any open modal */
-  document.addEventListener('keydown', function(e){
-    if (e.key === 'Escape') { closeAddItemModal(); closeRestock(); }
-  });
+  /* Escape is handled globally by base.html — no duplicate listener needed */
 
   async function confirmRestock() {
     var qty   = parseInt(document.getElementById('restock-qty').value, 10);
