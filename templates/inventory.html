@@ -9,7 +9,6 @@
     <h2>Inventory</h2>
     <p style="color:var(--text-muted);font-size:0.875rem;margin-top:4px;">Unified view of all items</p>
   </div>
-
 </div>
 
 <!-- Summary Stats -->
@@ -90,13 +89,17 @@
             <span style="font-family:var(--mono);font-weight:700;color:var(--accent);">{{ box.total_quantity }}</span>
           </td>
           <td style="white-space:nowrap;">
-            <div style="display:flex;gap:6px;align-items:center;">
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
               <button class="btn btn-secondary btn-sm"
                 onclick="toggleItems({{ box.id }}, this)"
                 id="toggle-btn-{{ box.id }}">
                 View Items
               </button>
               {% if session.get('role') in ('admin', 'storekeeper') %}
+              <button class="btn btn-primary btn-sm"
+                onclick="openAddItemModal({{ box.id }}, '{{ box.box_name | e }}')">
+                Add Item
+              </button>
               <a href="{{ url_for('edit_box', box_id=box.id) }}" class="btn btn-secondary btn-sm">Edit</a>
               {% endif %}
               {% if session.get('role') == 'admin' %}
@@ -151,6 +154,56 @@
     </div>
   </div>
 </div>
+
+<!-- ── Add Item Modal ─────────────────────────────────────────────────────── -->
+<div id="add-item-modal"
+  style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:1000;align-items:center;justify-content:center;">
+  <div class="card" style="width:440px;max-width:95vw;">
+    <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
+      <div>
+        <span class="card-title">Add Item</span>
+        <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">
+          Into: <span id="ai-modal-box-label" style="color:var(--accent);font-weight:600;"></span>
+        </div>
+      </div>
+      <button class="btn btn-sm btn-secondary" onclick="closeAddItemModal()">✕</button>
+    </div>
+    <div class="card-body" style="display:flex;flex-direction:column;gap:14px;">
+
+      <div class="form-group">
+        <label for="ai-item-name">Item Name <span style="color:var(--danger);">*</span></label>
+        <input type="text" id="ai-item-name" placeholder="e.g. Arduino Uno" autocomplete="off">
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <div class="form-group">
+          <label for="ai-quantity">Initial Quantity <span style="color:var(--danger);">*</span></label>
+          <input type="number" id="ai-quantity" min="0" value="0"
+            style="font-family:var(--mono);font-size:16px;text-align:center;">
+        </div>
+        <div class="form-group">
+          <label for="ai-min-stock">Min Stock</label>
+          <input type="number" id="ai-min-stock" min="0" value="5"
+            style="font-family:var(--mono);font-size:16px;text-align:center;">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="ai-description">Description</label>
+        <input type="text" id="ai-description" placeholder="Optional description">
+      </div>
+
+      <div id="ai-error" style="display:none;" class="alert alert-error"></div>
+
+      <div style="display:flex;gap:10px;margin-top:4px;">
+        <button id="ai-submit-btn" class="btn btn-primary" style="flex:1;" onclick="submitAddItem()">
+          + Add Item
+        </button>
+        <button class="btn btn-secondary" onclick="closeAddItemModal()">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
 {% endif %}
 {% endblock %}
 
@@ -182,8 +235,8 @@
   /* ── Column filter ── */
   function applyColumnFilter() {
     const colId = document.getElementById('filter-column').value;
-    const boxRows  = document.querySelectorAll('.box-row');
-    const subRows  = document.querySelectorAll('.items-subrow');
+    const boxRows = document.querySelectorAll('.box-row');
+    const subRows = document.querySelectorAll('.items-subrow');
     let visible = 0;
 
     boxRows.forEach(row => {
@@ -192,19 +245,17 @@
       visible += show ? 1 : 0;
     });
     subRows.forEach(row => {
-      const show = !colId || row.dataset.columnId === colId;
-      row.style.display = show ? 'none' : 'none'; // keep collapsed on filter change
+      row.style.display = 'none';
     });
-    // Re-collapse all toggles when filter changes
     document.querySelectorAll('[id^="toggle-btn-"]').forEach(btn => {
       btn.textContent = 'View Items';
       btn.classList.remove('btn-primary');
       btn.classList.add('btn-secondary');
     });
 
-    const tableWrap = document.querySelector('.table-wrap');
+    const tableWrap  = document.querySelector('.table-wrap');
     const emptyState = document.getElementById('empty-state');
-    tableWrap.style.display = visible === 0 ? 'none' : '';
+    tableWrap.style.display  = visible === 0 ? 'none' : '';
     emptyState.style.display = visible === 0 ? 'flex' : 'none';
   }
 
@@ -215,8 +266,8 @@
 
   /* ── Toggle items sub-row ── */
   function toggleItems(boxId, btn) {
-    const subRow   = document.getElementById('items-row-' + boxId);
-    const isOpen   = subRow.style.display !== 'none';
+    const subRow = document.getElementById('items-row-' + boxId);
+    const isOpen = subRow.style.display !== 'none';
 
     if (isOpen) {
       subRow.style.display = 'none';
@@ -243,14 +294,16 @@
         <div class="empty-state" style="padding:20px 0;border:none;background:none;">
           <div class="empty-icon" style="font-size:1.5rem;">📦</div>
           <div class="empty-title" style="font-size:0.95rem;">No items in this box</div>
-          ${isPrivileged ? `<a href="/items/add" class="btn btn-primary btn-sm" style="margin-top:10px;">+ Add Item</a>` : ''}
+          ${isPrivileged ? `<button class="btn btn-primary btn-sm" style="margin-top:10px;"
+            onclick="openAddItemModal(${boxId}, document.querySelector('[data-box-id=\\'${boxId}\\'] span').textContent.trim())">
+            + Add Item</button>` : ''}
         </div>`;
       return;
     }
 
     const statusLabel = { out: 'Out of Stock', low: 'Low Stock', ok: 'Healthy' };
-    const statusClass = { out: 'badge-danger', low: 'badge-warning', ok: 'badge-success' };
-    const qtyColor    = { out: 'var(--danger)', low: 'var(--warning)', ok: 'var(--text)' };
+    const statusClass = { out: 'badge-danger',  low: 'badge-warning',  ok: 'badge-success' };
+    const qtyColor    = { out: 'var(--danger)',  low: 'var(--warning)', ok: 'var(--text)' };
 
     const rows = items.map(item => `
       <tr id="inv-row-${item.id}"
@@ -354,7 +407,6 @@
         const badgeEl = document.getElementById('badge-' + restockItemId);
         const row     = document.getElementById('inv-row-' + restockItemId);
 
-        // Find min_stock from allItemsData
         let minStock = 0;
         for (const boxId in allItemsData) {
           const found = allItemsData[boxId].find(i => String(i.id) === String(restockItemId));
@@ -379,7 +431,6 @@
           row.style.borderLeft = newStatus === 'out' ? '3px solid var(--danger)'
                                : newStatus === 'low' ? '3px solid var(--warning)' : '';
         }
-        // Update restock btn qty
         const restockBtn = document.querySelector(`[data-item-id="${restockItemId}"]`);
         if (restockBtn) restockBtn.dataset.itemQty = newQty;
 
@@ -399,6 +450,99 @@
 
   document.getElementById('restock-modal') && document.getElementById('restock-modal').addEventListener('click', function(e) {
     if (e.target === this) closeRestock();
+  });
+
+  /* ── Add Item Modal ── */
+  let activeBoxId = null;
+
+  function openAddItemModal(boxId, boxName) {
+    activeBoxId = boxId;
+    document.getElementById('ai-modal-box-label').textContent = boxName;
+    document.getElementById('ai-item-name').value    = '';
+    document.getElementById('ai-quantity').value     = '0';
+    document.getElementById('ai-min-stock').value    = '5';
+    document.getElementById('ai-description').value  = '';
+    document.getElementById('ai-error').style.display = 'none';
+    document.getElementById('add-item-modal').style.display = 'flex';
+    setTimeout(() => document.getElementById('ai-item-name').focus(), 50);
+  }
+
+  function closeAddItemModal() {
+    document.getElementById('add-item-modal').style.display = 'none';
+    activeBoxId = null;
+  }
+
+  async function submitAddItem() {
+    const itemName    = document.getElementById('ai-item-name').value.trim();
+    const quantity    = parseInt(document.getElementById('ai-quantity').value);
+    const minStock    = parseInt(document.getElementById('ai-min-stock').value);
+    const description = document.getElementById('ai-description').value.trim();
+    const errEl       = document.getElementById('ai-error');
+    errEl.style.display = 'none';
+
+    if (!itemName) {
+      errEl.textContent = 'Item name is required.';
+      errEl.style.display = 'block';
+      document.getElementById('ai-item-name').focus();
+      return;
+    }
+    if (isNaN(quantity) || quantity < 0) {
+      errEl.textContent = 'Initial quantity must be 0 or more.';
+      errEl.style.display = 'block';
+      return;
+    }
+    if (isNaN(minStock) || minStock < 0) {
+      errEl.textContent = 'Min stock must be 0 or more.';
+      errEl.style.display = 'block';
+      return;
+    }
+
+    const btn = document.getElementById('ai-submit-btn');
+    setLoading(btn, true, 'Adding...');
+
+    try {
+      const res = await fetch('/api/box/' + activeBoxId + '/add-item', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          item_name:   itemName,
+          quantity:    quantity,
+          min_stock:   minStock,
+          description: description
+        })
+      });
+      const data = await res.json();
+      setLoading(btn, false, '+ Add Item');
+
+      if (data.success) {
+        showToast('"' + itemName + '" added successfully!', 'success');
+        closeAddItemModal();
+        setTimeout(() => location.reload(), 800);
+      } else {
+        errEl.textContent = data.error || 'Failed to add item.';
+        errEl.style.display = 'block';
+      }
+    } catch (err) {
+      setLoading(btn, false, '+ Add Item');
+      errEl.textContent = 'Network error. Please try again.';
+      errEl.style.display = 'block';
+    }
+  }
+
+  // Close on backdrop click
+  document.getElementById('add-item-modal') && document.getElementById('add-item-modal').addEventListener('click', function(e) {
+    if (e.target === this) closeAddItemModal();
+  });
+
+  // Enter / Escape key handling
+  ['ai-item-name', 'ai-quantity', 'ai-min-stock', 'ai-description'].forEach(function(id) {
+    const el = document.getElementById(id);
+    if (el) {
+      el.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter')  submitAddItem();
+        if (e.key === 'Escape') closeAddItemModal();
+      });
+    }
   });
 </script>
 {% endblock %}

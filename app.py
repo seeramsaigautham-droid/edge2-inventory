@@ -2035,6 +2035,45 @@ def api_analytics_daily():
         return jsonify([dict(r) for r in rows])
     except sqlite3.Error:
         return jsonify({'error': 'Database error'}), 500
+    
+
+@app.route('/api/box/<int:box_id>/add-item', methods=['POST'])
+@login_required
+@role_required('admin', 'storekeeper')
+def api_add_item_to_box(box_id):
+    data        = request.get_json()
+    item_name   = (data.get('item_name') or '').strip()
+    quantity    = data.get('quantity', 0)
+    min_stock   = data.get('min_stock', 5)
+    description = (data.get('description') or '').strip()
+
+    if not item_name:
+        return jsonify({'error': 'Item name is required.'}), 400
+    try:
+        quantity  = int(quantity)
+        min_stock = int(min_stock)
+        if quantity < 0 or min_stock < 0:
+            raise ValueError
+    except (ValueError, TypeError):
+        return jsonify({'error': 'Quantity and min stock must be non-negative integers.'}), 400
+
+    conn = get_db()
+    box = conn.execute("SELECT * FROM boxes WHERE id=?", (box_id,)).fetchone()
+    if not box:
+        conn.close()
+        return jsonify({'error': 'Box not found.'}), 404
+
+    try:
+        conn.execute(
+            "INSERT INTO inventory_items (box_id, item_name, quantity, min_stock, description) VALUES (?,?,?,?,?)",
+            (box_id, item_name, quantity, min_stock, description)
+        )
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True})
+    except sqlite3.Error as e:
+        conn.close()
+        return jsonify({'error': 'Database error: ' + str(e)}), 500
 # ─── MAIN ─────────────────────────────────────────────────────────────────────
 init_db()
 if __name__ == '__main__':
