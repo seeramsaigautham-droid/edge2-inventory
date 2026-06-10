@@ -6,9 +6,7 @@
 {% block content %}
 <div class="page-header">
   <h2>Transaction Reports</h2>
-  <a href="{{ url_for('reports_export', **filters) }}" class="btn btn-success">
-    ↓ Export CSV
-  </a>
+  <a href="{{ url_for('reports_export', **filters) }}" class="btn btn-success">↓ Export CSV</a>
 </div>
 
 <!-- Filter Form -->
@@ -52,6 +50,24 @@
             {% endfor %}
           </select>
         </div>
+        <div class="form-group" style="margin-bottom:0;">
+          <label>Project</label>
+          <select name="project_id">
+            <option value="">All Projects</option>
+            <option value="none" {% if filters.project_id == 'none' %}selected{% endif %}>— No Project —</option>
+            {% for p in all_projects %}
+            <option value="{{ p.id }}" {% if filters.project_id|string == p.id|string %}selected{% endif %}>{{ p.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group" style="margin-bottom:0;">
+          <label>Returnable</label>
+          <select name="returnable">
+            <option value="">All</option>
+            <option value="1" {% if filters.returnable == '1' %}selected{% endif %}>Returnable</option>
+            <option value="0" {% if filters.returnable == '0' %}selected{% endif %}>Non-Returnable</option>
+          </select>
+        </div>
         <div style="display:flex;gap:8px;align-items:flex-end;">
           <button type="submit" class="btn btn-primary" style="flex:1;">Apply</button>
           <a href="{{ url_for('reports') }}" class="btn btn-secondary">Reset</a>
@@ -67,7 +83,7 @@
     <span class="card-title">Results</span>
     <span style="font-size:12.5px;color:var(--text-muted);">
       {{ txns|length }} record{% if txns|length != 1 %}s{% endif %}
-      {% if txns|length == 500 %} <span style="color:var(--warning);">(limit: 500)</span>{% endif %}
+      {% if txns|length == 500 %}<span style="color:var(--warning);"> (limit: 500)</span>{% endif %}
     </span>
   </div>
 
@@ -82,6 +98,8 @@
           <th>Location</th>
           <th>Type</th>
           <th>Qty</th>
+          <th>Project</th>
+          <th>Returnable</th>
           <th>Timestamp</th>
         </tr>
       </thead>
@@ -93,15 +111,29 @@
           <td>{{ t.item_name }}</td>
           <td style="color:var(--text-muted);font-size:12.5px;">{{ t.column_name }} › {{ t.box_name }}</td>
           <td>
-            {% if t.type == 'take' %}
-              <span class="badge badge-info">take</span>
-            {% elif t.type == 'return' %}
-              <span class="badge badge-success">return</span>
-            {% else %}
-              <span class="badge badge-warning">restock</span>
-            {% endif %}
+            {% if t.type == 'take' %}<span class="badge badge-info">take</span>
+            {% elif t.type == 'return' %}<span class="badge badge-success">return</span>
+            {% else %}<span class="badge badge-warning">restock</span>{% endif %}
           </td>
           <td class="mono">{{ t.quantity }}</td>
+          <td style="font-size:12.5px;">
+            {% if t.project_name %}
+              <span class="badge badge-muted">{{ t.project_name }}</span>
+            {% else %}
+              <span style="color:var(--text-dim);">—</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if t.type == 'take' %}
+              {% if t.is_returnable == 0 %}
+                <span class="badge badge-warning">No</span>
+              {% else %}
+                <span class="badge badge-success">Yes</span>
+              {% endif %}
+            {% else %}
+              <span style="color:var(--text-dim);">—</span>
+            {% endif %}
+          </td>
           <td class="mono" style="color:var(--text-muted);font-size:12px;">{{ t.timestamp }}</td>
         </tr>
         {% endfor %}

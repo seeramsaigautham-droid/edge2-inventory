@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}{% if project %}Edit Project{% else %}Add Project{% endif %} — Edge2 Inventory{% endblock %}
+{% block page_title %}{% if project %}Edit Project{% else %}Add Project{% endif %}{% endblock %}
+
+{% block content %}
+<div class="breadcrumb">
+  <a href="{{ url_for('projects') }}">Projects</a>
+  <span class="sep">›</span>
+  <span>{% if project %}Edit — {{ project.name }}{% else %}New Project{% endif %}</span>
+</div>
+
+<div style="max-width:520px;">
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">{% if project %}Edit Project{% else %}New Project{% endif %}</span>
+    </div>
+    <div class="card-body">
+      {% if error %}
+      <div class="alert alert-error">{{ error }}</div>
+      {% endif %}
+
+      <form method="POST">
+        <div class="form-group">
+          <label>Project Name <span style="color:var(--danger);">*</span></label>
+          <input type="text" name="name" value="{{ project.name if project else '' }}"
+            placeholder="e.g. Robotics Lab Q3" required autofocus>
+        </div>
+        <div class="form-group">
+          <label>Description <span style="color:var(--text-dim);font-weight:400;">(optional)</span></label>
+          <textarea name="description" placeholder="Short description of this project…">{{ project.description if project else '' }}</textarea>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:8px;">
+          <button type="submit" class="btn btn-primary" style="flex:1;">
+            {% if project %}Save Changes{% else %}Create Project{% endif %}
+          </button>
+          <a href="{{ url_for('projects') }}" class="btn btn-secondary">Cancel</a>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -7,7 +7,6 @@
 
 {% if session.get('role') in ('admin', 'storekeeper') %}
 
-  {# Phase 8: Out-of-stock alert banner #}
   {% if out_of_stock_items %}
   <div class="alert alert-error" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
     <span>⚠ {{ out_of_stock_items|length }} item{{ 's' if out_of_stock_items|length != 1 else '' }} completely out of stock.</span>
@@ -92,7 +91,7 @@
       {% if recent_txns %}
       <div class="table-wrap">
         <table>
-          <thead><tr><th>User</th><th>Item</th><th>Type</th><th>Qty</th><th>Time</th></tr></thead>
+          <thead><tr><th>User</th><th>Item</th><th>Type</th><th>Qty</th><th>Project</th><th>Time</th></tr></thead>
           <tbody>
             {% for t in recent_txns %}
             <tr>
@@ -104,6 +103,9 @@
                 {% else %}<span class="badge badge-warning">restock</span>{% endif %}
               </td>
               <td class="mono">{{ t.quantity }}</td>
+              <td style="font-size:11.5px;color:var(--text-muted);">
+                {% if t.project_name %}<span class="badge badge-muted" style="font-size:10px;">{{ t.project_name }}</span>{% else %}—{% endif %}
+              </td>
               <td style="font-size:11.5px;color:var(--text-muted);" class="mono">{{ t.timestamp[:16] }}</td>
             </tr>
             {% endfor %}
@@ -189,8 +191,7 @@
 
 {% elif session.get('role') == 'employee' %}
 
-  <div style="display:grid;grid-template-columns:1fr ;gap:18px;">
-
+  <div style="display:grid;grid-template-columns:1fr;gap:18px;">
     <div class="card">
       <div class="card-header"><span class="card-title">Quick Actions</span></div>
       <div class="card-body" style="display:flex;flex-direction:column;gap:10px;">
@@ -203,7 +204,36 @@
       </div>
     </div>
 
-    
+    {% if recent_txns %}
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">My Recent Activity</span>
+        <a href="{{ url_for('my_history') }}" class="btn btn-secondary btn-sm">Full History →</a>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Item</th><th>Type</th><th>Qty</th><th>Project</th><th>Time</th></tr></thead>
+          <tbody>
+            {% for t in recent_txns %}
+            <tr>
+              <td>{{ t.item_name }}</td>
+              <td>
+                {% if t.type == 'take' %}<span class="badge badge-info">take</span>
+                {% elif t.type == 'return' %}<span class="badge badge-success">return</span>
+                {% else %}<span class="badge badge-warning">restock</span>{% endif %}
+              </td>
+              <td class="mono">{{ t.quantity }}</td>
+              <td style="font-size:12px;color:var(--text-muted);">
+                {% if t.project_name %}<span class="badge badge-muted" style="font-size:10px;">{{ t.project_name }}</span>{% else %}—{% endif %}
+              </td>
+              <td style="font-size:11.5px;color:var(--text-muted);" class="mono">{{ t.timestamp[:16] }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endif %}
 
   </div>
 

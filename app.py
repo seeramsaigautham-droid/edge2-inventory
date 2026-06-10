@@ -46,7 +46,7 @@ def role_required(*roles):
         return decorated
     return decorator
 
-# ─── CONTEXT PROCESSOR: LOW STOCK BADGE (Phase 8) ────────────────────────────
+# ─── CONTEXT PROCESSOR: LOW STOCK BADGE ──────────────────────────────────────
 
 @app.context_processor
 def inject_low_stock_count():
@@ -103,15 +103,25 @@ def init_db():
             FOREIGN KEY(box_id) REFERENCES boxes(id) ON DELETE CASCADE
         );
 
+        CREATE TABLE IF NOT EXISTS projects (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            description TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+
         CREATE TABLE IF NOT EXISTS transactions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
             item_id INTEGER NOT NULL,
             quantity INTEGER NOT NULL,
             type TEXT NOT NULL,
+            project_id INTEGER,
+            is_returnable INTEGER NOT NULL DEFAULT 1,
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY(user_id) REFERENCES users(id),
-            FOREIGN KEY(item_id) REFERENCES inventory_items(id)
+            FOREIGN KEY(item_id) REFERENCES inventory_items(id),
+            FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE SET NULL
         );
 
         CREATE TABLE IF NOT EXISTS active_borrowings (
@@ -119,12 +129,24 @@ def init_db():
             user_id INTEGER NOT NULL,
             item_id INTEGER NOT NULL,
             quantity_borrowed INTEGER NOT NULL DEFAULT 0,
+            is_returnable INTEGER NOT NULL DEFAULT 1,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(user_id, item_id),
             FOREIGN KEY(user_id) REFERENCES users(id),
             FOREIGN KEY(item_id) REFERENCES inventory_items(id)
         );
     ''')
+
+    # Migrate existing tables if columns are missing (safe to run on existing DB)
+    for migration in [
+        "ALTER TABLE transactions ADD COLUMN project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL",
+        "ALTER TABLE transactions ADD COLUMN is_returnable INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE active_borrowings ADD COLUMN is_returnable INTEGER NOT NULL DEFAULT 1",
+    ]:
+        try:
+            c.execute(migration)
+        except sqlite3.OperationalError:
+            pass  # column already exists
 
     # Seed users
     users = [
@@ -213,8 +235,7 @@ def index():
         return redirect(url_for('dashboard'))
     return redirect(url_for('login'))
 
-# Rate limiting: track failed attempts per IP
-_login_attempts = {}  # {ip: {'count': int, 'locked_until': datetime|None}}
+_login_attempts = {}
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -222,14 +243,12 @@ def login():
     error = None
     ip = request.remote_addr
 
-    # Clean up expired locks
     if ip in _login_attempts:
         locked_until = _login_attempts[ip].get('locked_until')
         if locked_until and datetime.now() > locked_until:
             _login_attempts[ip] = {'count': 0, 'locked_until': None}
 
     if request.method == 'POST':
-        # Check if locked
         if ip in _login_attempts and _login_attempts[ip].get('locked_until'):
             if datetime.now() < _login_attempts[ip]['locked_until']:
                 remaining = int((_login_attempts[ip]['locked_until'] - datetime.now()).total_seconds())
@@ -256,7 +275,6 @@ def login():
             session['role']      = user['role']
             return redirect(url_for('dashboard'))
 
-        # Failed attempt
         if ip not in _login_attempts:
             _login_attempts[ip] = {'count': 0, 'locked_until': None}
         _login_attempts[ip]['count'] += 1
@@ -308,7 +326,6 @@ def dashboard():
             "SELECT COUNT(*) FROM inventory_items WHERE quantity <= min_stock"
         ).fetchone()[0]
 
-        # Phase 8: out-of-stock items for banner
         out_of_stock_items = conn.execute("""
             SELECT ii.*, b.box_name, col.column_name
             FROM inventory_items ii
@@ -319,12 +336,14 @@ def dashboard():
         """).fetchall()
 
         recent_txns = conn.execute("""
-            SELECT t.*, u.name as user_name, ii.item_name, b.box_name, col.column_name
+            SELECT t.*, u.name as user_name, ii.item_name, b.box_name, col.column_name,
+                   p.name as project_name
             FROM transactions t
             JOIN users u ON t.user_id = u.id
             JOIN inventory_items ii ON t.item_id = ii.id
             JOIN boxes b ON ii.box_id = b.id
             JOIN columns col ON b.column_id = col.id
+            LEFT JOIN projects p ON t.project_id = p.id
             ORDER BY t.timestamp DESC LIMIT 8
         """).fetchall()
 
@@ -340,12 +359,14 @@ def dashboard():
 
     elif session['role'] == 'employee':
         recent_txns = conn.execute("""
-            SELECT t.*, u.name as user_name, ii.item_name, b.box_name, col.column_name
+            SELECT t.*, u.name as user_name, ii.item_name, b.box_name, col.column_name,
+                   p.name as project_name
             FROM transactions t
             JOIN users u ON t.user_id = u.id
             JOIN inventory_items ii ON t.item_id = ii.id
             JOIN boxes b ON ii.box_id = b.id
             JOIN columns col ON b.column_id = col.id
+            LEFT JOIN projects p ON t.project_id = p.id
             WHERE t.user_id = ?
             ORDER BY t.timestamp DESC LIMIT 8
         """, (session['user_id'],)).fetchall()
@@ -424,14 +445,16 @@ def user_profile(user_id):
         return redirect(url_for('users'))
 
     transactions = conn.execute("""
-        SELECT t.id, t.item_id, t.quantity, t.type, t.timestamp,
+        SELECT t.id, t.item_id, t.quantity, t.type, t.timestamp, t.project_id, t.is_returnable,
                ii.item_name, b.box_name, col.column_name,
-               COALESCE(ab.quantity_borrowed, 0) as currently_borrowed
+               COALESCE(ab.quantity_borrowed, 0) as currently_borrowed,
+               p.name as project_name
         FROM transactions t
         JOIN inventory_items ii ON t.item_id = ii.id
         JOIN boxes b ON ii.box_id = b.id
         JOIN columns col ON b.column_id = col.id
         LEFT JOIN active_borrowings ab ON ab.user_id = t.user_id AND ab.item_id = t.item_id
+        LEFT JOIN projects p ON t.project_id = p.id
         WHERE t.user_id = ?
         ORDER BY t.timestamp DESC
     """, (user_id,)).fetchall()
@@ -507,8 +530,9 @@ def my_items():
         WHERE ab.user_id = ? AND ab.quantity_borrowed > 0
         ORDER BY ab.updated_at DESC
     """, (session['user_id'],)).fetchall()
+    projects = conn.execute("SELECT id, name FROM projects ORDER BY name").fetchall()
     conn.close()
-    return render_template('my_items.html', borrowings=borrowings)
+    return render_template('my_items.html', borrowings=borrowings, projects=projects)
 
 # ─── ROUTES: TRANSACTIONS ─────────────────────────────────────────────────────
 
@@ -518,16 +542,102 @@ def my_items():
 def transactions():
     conn = get_db()
     txns = conn.execute("""
-        SELECT t.*, u.name as user_name, ii.item_name, b.box_name, col.column_name
+        SELECT t.*, u.name as user_name, ii.item_name, b.box_name, col.column_name,
+               p.name as project_name
         FROM transactions t
         JOIN users u ON t.user_id = u.id
         JOIN inventory_items ii ON t.item_id = ii.id
         JOIN boxes b ON ii.box_id = b.id
         JOIN columns col ON b.column_id = col.id
+        LEFT JOIN projects p ON t.project_id = p.id
         ORDER BY t.timestamp DESC LIMIT 200
     """).fetchall()
     conn.close()
     return render_template('transactions.html', txns=txns)
+
+# ─── ROUTES: PROJECTS ─────────────────────────────────────────────────────────
+
+@app.route('/projects')
+@login_required
+@role_required('admin', 'storekeeper')
+def projects():
+    conn = get_db()
+    all_projects = conn.execute("""
+        SELECT p.*, COUNT(t.id) as txn_count
+        FROM projects p
+        LEFT JOIN transactions t ON t.project_id = p.id
+        GROUP BY p.id
+        ORDER BY p.name
+    """).fetchall()
+    conn.close()
+    return render_template('projects.html', projects=all_projects)
+
+@app.route('/projects/add', methods=['GET', 'POST'])
+@login_required
+@role_required('admin', 'storekeeper')
+def add_project():
+    error = None
+    if request.method == 'POST':
+        name        = request.form.get('name', '').strip()
+        description = request.form.get('description', '').strip()
+        if not name:
+            error = 'Project name is required.'
+        else:
+            conn = get_db()
+            try:
+                conn.execute(
+                    "INSERT INTO projects (name, description) VALUES (?,?)",
+                    (name, description)
+                )
+                conn.commit()
+                conn.close()
+                return redirect(url_for('projects'))
+            except sqlite3.IntegrityError:
+                error = 'A project with that name already exists.'
+                conn.close()
+    return render_template('add_project.html', error=error)
+
+@app.route('/projects/edit/<int:project_id>', methods=['GET', 'POST'])
+@login_required
+@role_required('admin', 'storekeeper')
+def edit_project(project_id):
+    conn = get_db()
+    project = conn.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone()
+    if not project:
+        conn.close()
+        return redirect(url_for('projects'))
+    error = None
+    if request.method == 'POST':
+        name        = request.form.get('name', '').strip()
+        description = request.form.get('description', '').strip()
+        if not name:
+            error = 'Project name is required.'
+        else:
+            try:
+                conn.execute(
+                    "UPDATE projects SET name=?, description=? WHERE id=?",
+                    (name, description, project_id)
+                )
+                conn.commit()
+                conn.close()
+                return redirect(url_for('projects'))
+            except sqlite3.IntegrityError:
+                error = 'A project with that name already exists.'
+    conn.close()
+    return render_template('add_project.html', error=error, project=project)
+
+@app.route('/projects/delete/<int:project_id>', methods=['POST'])
+@login_required
+@role_required('admin')
+def delete_project(project_id):
+    try:
+        conn = get_db()
+        conn.execute("DELETE FROM projects WHERE id=?", (project_id,))
+        conn.commit()
+        conn.close()
+    except sqlite3.Error:
+        pass
+    return redirect(url_for('projects'))
 
 # ─── ROUTES: COLUMNS ──────────────────────────────────────────────────────────
 
@@ -608,6 +718,7 @@ def delete_column(column_id):
     except sqlite3.Error:
         pass
     return redirect(url_for('columns'))
+
 @app.route('/columns/<int:column_id>')
 @login_required
 @role_required('admin', 'storekeeper')
@@ -757,7 +868,6 @@ def delete_box(box_id):
     except sqlite3.Error:
         pass
     return redirect(url_for('boxes'))
-
 
 @app.route('/boxes/<int:box_id>')
 @login_required
@@ -936,8 +1046,6 @@ def restock_item(item_id):
     conn.close()
     return jsonify({'success': True, 'new_quantity': new_qty})
 
-# ─── ROUTES: BULK RESTOCK ─────────────────────────────────────────────────────
-
 @app.route('/items/bulk-restock', methods=['POST'])
 @login_required
 @role_required('admin', 'storekeeper')
@@ -989,8 +1097,6 @@ def bulk_restock():
         'message': f'Successfully restocked {updated} item(s).'
     })
 
-# ─── ROUTE: RESTOCK ALL LOW ITEMS (Phase 8) ───────────────────────────────────
-
 @app.route('/items/restock-all', methods=['POST'])
 @login_required
 @role_required('admin', 'storekeeper')
@@ -1034,7 +1140,7 @@ def restock_all_low():
         'message': f'Successfully restocked {updated} low-stock item(s).'
     })
 
-# ─── ROUTES: INVENTORY EXPORT ─────────────────────────────────────────────────
+# ─── ROUTES: INVENTORY EXPORT/IMPORT ─────────────────────────────────────────
 
 @app.route('/inventory/export')
 @login_required
@@ -1091,8 +1197,6 @@ def inventory_export():
         download_name=f'inventory_export_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv'
     )
 
-# ─── ROUTES: INVENTORY IMPORT ─────────────────────────────────────────────────
-
 @app.route('/inventory/import', methods=['GET', 'POST'])
 @login_required
 @role_required('admin', 'storekeeper')
@@ -1107,15 +1211,12 @@ def inventory_import():
         if not file or not file.filename.endswith('.csv'):
             return render_template('import_items.html',
                                    error='Please upload a valid CSV file.')
-
         try:
             content = file.read().decode('utf-8-sig')
             reader = csv.DictReader(io.StringIO(content))
-
             required_cols = {'column_name', 'box_name', 'item_name', 'quantity', 'min_stock'}
             if not reader.fieldnames:
                 return render_template('import_items.html', error='CSV file is empty.')
-
             actual_cols = {c.strip().lower() for c in reader.fieldnames}
             missing = required_cols - actual_cols
             if missing:
@@ -1132,7 +1233,6 @@ def inventory_import():
                 quantity    = row.get('quantity', '').strip()
                 min_stock   = row.get('min_stock', '').strip()
                 description = row.get('description', '').strip()
-
                 row_errors = []
                 if not column_name: row_errors.append('column_name is empty')
                 if not box_name:    row_errors.append('box_name is empty')
@@ -1149,25 +1249,18 @@ def inventory_import():
                 except (ValueError, TypeError):
                     row_errors.append('min_stock must be a non-negative integer')
                     min_stock = None
-
                 if row_errors:
                     errors.append({'row': i, 'errors': row_errors, 'data': row})
                 else:
                     rows.append({
-                        'column_name': column_name,
-                        'box_name':    box_name,
-                        'item_name':   item_name,
-                        'quantity':    quantity,
-                        'min_stock':   min_stock,
-                        'description': description,
-                        'valid':       True
+                        'column_name': column_name, 'box_name': box_name,
+                        'item_name': item_name, 'quantity': quantity,
+                        'min_stock': min_stock, 'description': description, 'valid': True
                     })
 
             session['import_preview'] = rows
             return render_template('import_items.html',
-                                   preview_rows=rows,
-                                   error_rows=errors,
-                                   preview_ready=True)
+                                   preview_rows=rows, error_rows=errors, preview_ready=True)
         except Exception as e:
             return render_template('import_items.html',
                                    error=f'Failed to parse CSV: {str(e)}')
@@ -1177,13 +1270,8 @@ def inventory_import():
         if not rows:
             return render_template('import_items.html',
                                    error='Preview session expired. Please re-upload.')
-
         conn = get_db()
-        imported = 0
-        skipped  = 0
-        created_columns = 0
-        created_boxes   = 0
-
+        imported = 0; skipped = 0; created_columns = 0; created_boxes = 0
         for row in rows:
             try:
                 col = conn.execute(
@@ -1216,7 +1304,6 @@ def inventory_import():
                     "SELECT id FROM inventory_items WHERE box_id=? AND item_name=?",
                     (box_id, row['item_name'])
                 ).fetchone()
-
                 if existing_item:
                     conn.execute(
                         "UPDATE inventory_items SET quantity=?, min_stock=?, description=? WHERE id=?",
@@ -1229,18 +1316,13 @@ def inventory_import():
                         (box_id, row['item_name'], row['quantity'], row['min_stock'], row['description'])
                     )
                     imported += 1
-
             except sqlite3.Error:
                 pass
-
         conn.commit()
         conn.close()
         return render_template('import_items.html',
-                               import_done=True,
-                               imported=imported,
-                               updated=skipped,
-                               created_columns=created_columns,
-                               created_boxes=created_boxes)
+                               import_done=True, imported=imported, updated=skipped,
+                               created_columns=created_columns, created_boxes=created_boxes)
 
     return redirect(url_for('inventory_import'))
 
@@ -1263,9 +1345,10 @@ def item_detail(item_id):
         return redirect(url_for('items'))
 
     recent_txns = conn.execute("""
-        SELECT t.*, u.name as user_name
+        SELECT t.*, u.name as user_name, p.name as project_name
         FROM transactions t
         JOIN users u ON t.user_id = u.id
+        LEFT JOIN projects p ON t.project_id = p.id
         WHERE t.item_id = ?
         ORDER BY t.timestamp DESC
         LIMIT 20
@@ -1290,13 +1373,9 @@ def item_detail(item_id):
 
     conn.close()
     return render_template('item_detail.html',
-        item=item,
-        recent_txns=recent_txns,
-        total_taken=total_taken,
-        total_returned=total_returned,
-        total_restocked=total_restocked,
-        currently_out=currently_out
-    )
+        item=item, recent_txns=recent_txns,
+        total_taken=total_taken, total_returned=total_returned,
+        total_restocked=total_restocked, currently_out=currently_out)
 
 # ─── ROUTES: LOW STOCK ────────────────────────────────────────────────────────
 
@@ -1323,7 +1402,7 @@ def low_stock():
 def scanner():
     return render_template('scanner.html')
 
-# ─── ROUTES: ANALYTICS ────────────────────────────────────────────────────────
+# ─── ROUTES: ANALYTICS & REPORTS ─────────────────────────────────────────────
 
 @app.route('/analytics')
 @login_required
@@ -1346,12 +1425,14 @@ def reports():
     column_id = request.args.get('column_id', '')
 
     query = """
-        SELECT t.*, u.name as user_name, ii.item_name, b.box_name, col.column_name
+        SELECT t.*, u.name as user_name, ii.item_name, b.box_name, col.column_name,
+               p.name as project_name
         FROM transactions t
         JOIN users u ON t.user_id = u.id
         JOIN inventory_items ii ON t.item_id = ii.id
         JOIN boxes b ON ii.box_id = b.id
         JOIN columns col ON b.column_id = col.id
+        LEFT JOIN projects p ON t.project_id = p.id
         WHERE 1=1
     """
     params = []
@@ -1378,13 +1459,8 @@ def reports():
         txns=txns, all_users=all_users, all_columns=all_columns,
         from_date=from_date, to_date=to_date,
         txn_type=txn_type, user_id=user_id, column_id=column_id,
-        filters={
-            'from_date': from_date,
-            'to_date': to_date,
-            'type': txn_type,
-            'user_id': user_id,
-            'column_id': column_id
-        })
+        filters={'from_date': from_date, 'to_date': to_date,
+                 'type': txn_type, 'user_id': user_id, 'column_id': column_id})
 
 @app.route('/reports/export')
 @login_required
@@ -1399,12 +1475,15 @@ def reports_export():
 
     query = """
         SELECT t.timestamp, u.name as user_name, ii.item_name,
-               col.column_name, b.box_name, t.type, t.quantity
+               col.column_name, b.box_name, t.type, t.quantity,
+               COALESCE(p.name, 'Default') as project_name,
+               CASE WHEN t.is_returnable = 1 THEN 'Yes' ELSE 'No' END as returnable
         FROM transactions t
         JOIN users u ON t.user_id = u.id
         JOIN inventory_items ii ON t.item_id = ii.id
         JOIN boxes b ON ii.box_id = b.id
         JOIN columns col ON b.column_id = col.id
+        LEFT JOIN projects p ON t.project_id = p.id
         WHERE 1=1
     """
     params = []
@@ -1430,10 +1509,11 @@ def reports_export():
 
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(['Timestamp', 'User', 'Item', 'Column', 'Box', 'Type', 'Quantity'])
+    writer.writerow(['Timestamp', 'User', 'Item', 'Column', 'Box', 'Type', 'Quantity', 'Project', 'Returnable'])
     for t in txns:
         writer.writerow([t['timestamp'], t['user_name'], t['item_name'],
-                         t['column_name'], t['box_name'], t['type'], t['quantity']])
+                         t['column_name'], t['box_name'], t['type'], t['quantity'],
+                         t['project_name'], t['returnable']])
 
     output.seek(0)
     return send_file(
@@ -1449,6 +1529,7 @@ def reports_export():
 @login_required
 @role_required('admin', 'storekeeper')
 def inventory():
+    import json
     conn = get_db()
     all_items = conn.execute("""
         SELECT ii.id, ii.item_name, ii.quantity, ii.min_stock, ii.description,
@@ -1460,7 +1541,6 @@ def inventory():
         ORDER BY col.column_name, b.box_name, ii.item_name
     """).fetchall()
 
-    # Box-level aggregated data for the box-style table view
     boxes_with_stats = conn.execute("""
         SELECT b.id, b.box_name, b.description,
                col.id as column_id, col.column_name,
@@ -1487,9 +1567,6 @@ def inventory():
     low_stock_count = sum(1 for i in all_items if 0 < i['quantity'] <= i['min_stock'])
     healthy_count   = sum(1 for i in all_items if i['quantity'] > i['min_stock'])
 
-    # Build items_json grouped by box_id — passed as a single safe JSON blob
-    # Build items_json grouped by box_id — passed as a single safe JSON blob
-    import json
     items_by_box = {}
     for item in all_items:
         bid = item['box_id']
@@ -1497,36 +1574,32 @@ def inventory():
             items_by_box[bid] = []
         qty = item['quantity']
         min_s = item['min_stock']
-        if qty == 0:
-            status = 'out'
-        elif qty <= min_s:
-            status = 'low'
-        else:
-            status = 'ok'
+        status = 'out' if qty == 0 else ('low' if qty <= min_s else 'ok')
         items_by_box[bid].append({
-            'id':          item['id'],
-            'name':        item['item_name'] or '',
+            'id': item['id'], 'name': item['item_name'] or '',
             'description': item['description'] or '',
-            'quantity':    qty,
-            'min_stock':   min_s,
-            'box_id':      bid,
-            'column_id':   item['column_id'],
-            'status':      status,
+            'quantity': qty, 'min_stock': min_s,
+            'box_id': bid, 'column_id': item['column_id'], 'status': status,
         })
 
     conn.close()
     return render_template('inventory.html',
-        items=all_items,
-        items_json=json.dumps(items_by_box),
+        items=all_items, items_json=json.dumps(items_by_box),
         boxes_with_stats=boxes_with_stats,
-        all_columns=all_columns,
-        all_boxes=all_boxes,
-        total_items=total_items,
-        out_of_stock=out_of_stock,
-        low_stock_count=low_stock_count,
-        healthy_count=healthy_count
-    )
-    
+        all_columns=all_columns, all_boxes=all_boxes,
+        total_items=total_items, out_of_stock=out_of_stock,
+        low_stock_count=low_stock_count, healthy_count=healthy_count)
+
+# ─── API: PROJECTS ────────────────────────────────────────────────────────────
+
+@app.route('/api/projects')
+@login_required
+def api_projects():
+    conn = get_db()
+    projs = conn.execute("SELECT id, name FROM projects ORDER BY name").fetchall()
+    conn.close()
+    return jsonify([dict(p) for p in projs])
+
 # ─── API: SCANNER ENDPOINTS ───────────────────────────────────────────────────
 
 @app.route('/api/column/<int:column_id>/boxes')
@@ -1546,10 +1619,7 @@ def api_column_boxes(column_id):
         ORDER BY b.box_name
     """, (column_id,)).fetchall()
     conn.close()
-    return jsonify({
-        'column_name': col['column_name'],
-        'boxes': [dict(b) for b in boxes]
-    })
+    return jsonify({'column_name': col['column_name'], 'boxes': [dict(b) for b in boxes]})
 
 @app.route('/api/box/<int:box_id>/items')
 @login_required
@@ -1569,11 +1639,8 @@ def api_box_items(box_id):
         ORDER BY item_name
     """, (box_id,)).fetchall()
     conn.close()
-    return jsonify({
-        'box_name': box['box_name'],
-        'column_name': box['column_name'],
-        'items': [dict(i) for i in items]
-    })
+    return jsonify({'box_name': box['box_name'], 'column_name': box['column_name'],
+                    'items': [dict(i) for i in items]})
 
 @app.route('/api/item/<int:item_id>')
 @login_required
@@ -1590,21 +1657,24 @@ def api_item(item_id):
         conn.close()
         return jsonify({'error': 'Item not found'}), 404
     borrowed = conn.execute(
-        "SELECT COALESCE(quantity_borrowed, 0) FROM active_borrowings WHERE user_id=? AND item_id=?",
+        "SELECT COALESCE(quantity_borrowed, 0) as qty, COALESCE(is_returnable, 1) as is_returnable FROM active_borrowings WHERE user_id=? AND item_id=?",
         (session['user_id'], item_id)
     ).fetchone()
     conn.close()
     d = dict(item)
-    d['quantity_borrowed'] = borrowed[0] if borrowed else 0
+    d['quantity_borrowed'] = borrowed['qty'] if borrowed else 0
+    d['is_returnable']     = borrowed['is_returnable'] if borrowed else 1
     return jsonify(d)
 
 @app.route('/api/transaction', methods=['POST'])
 @login_required
 def api_transaction():
-    data     = request.get_json()
-    item_id  = data.get('item_id')
-    quantity = data.get('quantity')
-    txn_type = data.get('type')
+    data         = request.get_json()
+    item_id      = data.get('item_id')
+    quantity     = data.get('quantity')
+    txn_type     = data.get('type')
+    project_id   = data.get('project_id') or None   # None means "Default / no project"
+    is_returnable = int(data.get('is_returnable', 1))
 
     if not item_id or not quantity or txn_type not in ('take', 'return'):
         return jsonify({'error': 'Invalid request'}), 400
@@ -1630,6 +1700,7 @@ def api_transaction():
         if quantity > item['quantity']:
             conn.close()
             return jsonify({'error': f'Only {item["quantity"]} units available'}), 400
+
         new_qty = item['quantity'] - quantity
         conn.execute(
             "UPDATE inventory_items SET quantity=? WHERE id=?", (new_qty, item_id)
@@ -1640,14 +1711,18 @@ def api_transaction():
         ).fetchone()
         if existing:
             conn.execute(
-                "UPDATE active_borrowings SET quantity_borrowed=quantity_borrowed+?, updated_at=CURRENT_TIMESTAMP WHERE user_id=? AND item_id=?",
-                (quantity, user_id, item_id)
+                "UPDATE active_borrowings SET quantity_borrowed=quantity_borrowed+?, is_returnable=?, updated_at=CURRENT_TIMESTAMP WHERE user_id=? AND item_id=?",
+                (quantity, is_returnable, user_id, item_id)
             )
         else:
             conn.execute(
-                "INSERT INTO active_borrowings (user_id, item_id, quantity_borrowed) VALUES (?,?,?)",
-                (user_id, item_id, quantity)
+                "INSERT INTO active_borrowings (user_id, item_id, quantity_borrowed, is_returnable) VALUES (?,?,?,?)",
+                (user_id, item_id, quantity, is_returnable)
             )
+        conn.execute(
+            "INSERT INTO transactions (user_id, item_id, quantity, type, project_id, is_returnable) VALUES (?,?,?,?,?,?)",
+            (user_id, item_id, quantity, 'take', project_id, is_returnable)
+        )
 
     elif txn_type == 'return':
         borrowing = conn.execute(
@@ -1655,9 +1730,15 @@ def api_transaction():
             (user_id, item_id)
         ).fetchone()
         currently_borrowed = borrowing['quantity_borrowed'] if borrowing else 0
+        borrow_returnable  = borrowing['is_returnable'] if borrowing else 1
+
+        if borrow_returnable == 0:
+            conn.close()
+            return jsonify({'error': 'This item was marked as non-returnable when taken.'}), 400
         if quantity > currently_borrowed:
             conn.close()
             return jsonify({'error': f'You only have {currently_borrowed} units borrowed'}), 400
+
         new_qty = item['quantity'] + quantity
         conn.execute(
             "UPDATE inventory_items SET quantity=? WHERE id=?", (new_qty, item_id)
@@ -1666,13 +1747,12 @@ def api_transaction():
             "UPDATE active_borrowings SET quantity_borrowed=quantity_borrowed-?, updated_at=CURRENT_TIMESTAMP WHERE user_id=? AND item_id=?",
             (quantity, user_id, item_id)
         )
+        conn.execute(
+            "INSERT INTO transactions (user_id, item_id, quantity, type, project_id, is_returnable) VALUES (?,?,?,?,?,?)",
+            (user_id, item_id, quantity, 'return', project_id, 1)
+        )
 
-    conn.execute(
-        "INSERT INTO transactions (user_id, item_id, quantity, type) VALUES (?,?,?,?)",
-        (user_id, item_id, quantity, txn_type)
-    )
     conn.commit()
-
     updated = conn.execute(
         "SELECT quantity FROM inventory_items WHERE id=?", (item_id,)
     ).fetchone()
@@ -1688,9 +1768,10 @@ def api_transaction():
 @login_required
 @role_required('admin', 'storekeeper')
 def api_restock():
-    data     = request.get_json()
-    item_id  = data.get('item_id')
-    quantity = data.get('quantity')
+    data       = request.get_json()
+    item_id    = data.get('item_id')
+    quantity   = data.get('quantity')
+    project_id = data.get('project_id') or None
 
     try:
         quantity = int(quantity)
@@ -1712,14 +1793,14 @@ def api_restock():
         "UPDATE inventory_items SET quantity=? WHERE id=?", (new_qty, item_id)
     )
     conn.execute(
-        "INSERT INTO transactions (user_id, item_id, quantity, type) VALUES (?,?,?,'restock')",
-        (session['user_id'], item_id, quantity)
+        "INSERT INTO transactions (user_id, item_id, quantity, type, project_id) VALUES (?,?,?,'restock',?)",
+        (session['user_id'], item_id, quantity, project_id)
     )
     conn.commit()
     conn.close()
     return jsonify({'success': True, 'new_quantity': new_qty})
 
-# ─── ROUTES: PROFILE (Phase 7) ────────────────────────────────────────────────
+# ─── ROUTES: PROFILE & HISTORY ────────────────────────────────────────────────
 
 @app.route('/profile', methods=['GET', 'POST'])
 @login_required
@@ -1765,7 +1846,6 @@ def profile():
             current_pw = request.form.get('current_password', '')
             new_pw     = request.form.get('new_password', '')
             confirm_pw = request.form.get('confirm_password', '')
-
             if not current_pw or not new_pw or not confirm_pw:
                 error = 'All password fields are required.'
             elif new_pw != confirm_pw:
@@ -1817,17 +1897,10 @@ def profile():
 
     conn.close()
     return render_template('profile.html',
-        user=user,
-        success=success,
-        error=error,
-        total_taken=total_taken,
-        total_returned=total_returned,
-        total_txns=total_txns,
-        currently_borrowed=currently_borrowed,
-        borrowings=borrowings
-    )
-
-# ─── ROUTES: MY HISTORY (Phase 7) ─────────────────────────────────────────────
+        user=user, success=success, error=error,
+        total_taken=total_taken, total_returned=total_returned,
+        total_txns=total_txns, currently_borrowed=currently_borrowed,
+        borrowings=borrowings)
 
 @app.route('/my-history')
 @login_required
@@ -1836,11 +1909,13 @@ def my_history():
     txn_type = request.args.get('type', '')
 
     query = """
-        SELECT t.*, ii.item_name, b.box_name, col.column_name
+        SELECT t.*, ii.item_name, b.box_name, col.column_name,
+               p.name as project_name
         FROM transactions t
         JOIN inventory_items ii ON t.item_id = ii.id
         JOIN boxes b ON ii.box_id = b.id
         JOIN columns col ON b.column_id = col.id
+        LEFT JOIN projects p ON t.project_id = p.id
         WHERE t.user_id = ?
     """
     params = [session['user_id']]
@@ -1869,14 +1944,15 @@ def my_history():
     conn.close()
     return render_template('history.html', txns=txns, txn_type=txn_type, stats=stats)
 
-# ─── API: QUICK RETURN (Phase 7) ──────────────────────────────────────────────
+# ─── API: QUICK RETURN ────────────────────────────────────────────────────────
 
 @app.route('/api/quick-return', methods=['POST'])
 @login_required
 def api_quick_return():
-    data     = request.get_json()
-    item_id  = data.get('item_id')
-    quantity = data.get('quantity')
+    data       = request.get_json()
+    item_id    = data.get('item_id')
+    quantity   = data.get('quantity')
+    project_id = data.get('project_id') or None
 
     try:
         quantity = int(quantity)
@@ -1894,6 +1970,10 @@ def api_quick_return():
     if not borrowing or borrowing['quantity_borrowed'] <= 0:
         conn.close()
         return jsonify({'error': 'You have no units of this item borrowed'}), 400
+
+    if borrowing['is_returnable'] == 0:
+        conn.close()
+        return jsonify({'error': 'This item was marked as non-returnable when taken.'}), 400
 
     if quantity > borrowing['quantity_borrowed']:
         conn.close()
@@ -1915,8 +1995,8 @@ def api_quick_return():
         (quantity, session['user_id'], item_id)
     )
     conn.execute(
-        "INSERT INTO transactions (user_id, item_id, quantity, type) VALUES (?,?,?,'return')",
-        (session['user_id'], item_id, quantity)
+        "INSERT INTO transactions (user_id, item_id, quantity, type, project_id) VALUES (?,?,?,'return',?)",
+        (session['user_id'], item_id, quantity, project_id)
     )
     conn.commit()
 
@@ -1933,109 +2013,7 @@ def api_quick_return():
         'message': f'Successfully returned {quantity} unit(s).'
     })
 
-# ─── ERROR HANDLERS ───────────────────────────────────────────────────────────
-
-@app.errorhandler(404)
-def not_found(e):
-    return render_template('404.html'), 404
-
-@app.errorhandler(500)
-def server_error(e):
-    return render_template('500.html'), 500
-
-# ─── API: ANALYTICS ───────────────────────────────────────────────────────────
-
-@app.route('/api/analytics/summary')
-@login_required
-@role_required('admin')
-def api_analytics_summary():
-    try:
-        conn = get_db()
-        total_items    = conn.execute("SELECT COUNT(*) FROM inventory_items").fetchone()[0]
-        total_txns     = conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
-        total_borrowed = conn.execute("SELECT COALESCE(SUM(quantity_borrowed),0) FROM active_borrowings WHERE quantity_borrowed > 0").fetchone()[0]
-        active_users   = conn.execute("SELECT COUNT(DISTINCT user_id) FROM transactions WHERE timestamp >= datetime('now', '-30 days')").fetchone()[0]
-        out_of_stock   = conn.execute("SELECT COUNT(*) FROM inventory_items WHERE quantity = 0").fetchone()[0]
-        low_stock      = conn.execute("SELECT COUNT(*) FROM inventory_items WHERE quantity > 0 AND quantity <= min_stock").fetchone()[0]
-        healthy        = conn.execute("SELECT COUNT(*) FROM inventory_items WHERE quantity > min_stock").fetchone()[0]
-        conn.close()
-        return jsonify({
-            'total_items': total_items,
-            'total_txns': total_txns,
-            'total_borrowed': total_borrowed,
-            'active_users': active_users,
-            'out_of_stock': out_of_stock,
-            'low_stock': low_stock,
-            'healthy': healthy
-        })
-    except sqlite3.Error:
-        return jsonify({'error': 'Database error'}), 500
-
-
-@app.route('/api/analytics/usage')
-@login_required
-@role_required('admin')
-def api_analytics_usage():
-    try:
-        conn = get_db()
-        top_items = conn.execute("""
-            SELECT ii.item_name, COUNT(t.id) as take_count
-            FROM transactions t
-            JOIN inventory_items ii ON t.item_id = ii.id
-            WHERE t.type = 'take'
-            GROUP BY t.item_id
-            ORDER BY take_count DESC LIMIT 8
-        """).fetchall()
-
-        user_usage = conn.execute("""
-            SELECT u.name, COUNT(t.id) as txn_count
-            FROM transactions t
-            JOIN users u ON t.user_id = u.id
-            GROUP BY t.user_id
-            ORDER BY txn_count DESC LIMIT 8
-        """).fetchall()
-
-        top_borrowers = conn.execute("""
-            SELECT u.name, COUNT(ab.item_id) as item_count,
-                   SUM(ab.quantity_borrowed) as total_borrowed
-            FROM active_borrowings ab
-            JOIN users u ON ab.user_id = u.id
-            WHERE ab.quantity_borrowed > 0
-            GROUP BY ab.user_id
-            ORDER BY total_borrowed DESC LIMIT 6
-        """).fetchall()
-        conn.close()
-        return jsonify({
-            'top_items':     [dict(r) for r in top_items],
-            'user_usage':    [dict(r) for r in user_usage],
-            'top_borrowers': [dict(r) for r in top_borrowers]
-        })
-    except sqlite3.Error:
-        return jsonify({'error': 'Database error'}), 500
-
-
-@app.route('/api/analytics/daily')
-@login_required
-@role_required('admin')
-def api_analytics_daily():
-    try:
-        conn = get_db()
-        rows = conn.execute("""
-            SELECT DATE(timestamp) as day,
-                   SUM(CASE WHEN type='take'    THEN 1 ELSE 0 END) as takes,
-                   SUM(CASE WHEN type='return'  THEN 1 ELSE 0 END) as returns,
-                   SUM(CASE WHEN type='restock' THEN 1 ELSE 0 END) as restocks,
-                   COUNT(*) as total
-            FROM transactions
-            WHERE timestamp >= datetime('now', '-30 days')
-            GROUP BY DATE(timestamp)
-            ORDER BY day ASC
-        """).fetchall()
-        conn.close()
-        return jsonify([dict(r) for r in rows])
-    except sqlite3.Error:
-        return jsonify({'error': 'Database error'}), 500
-    
+# ─── API: BOX ADD ITEM ────────────────────────────────────────────────────────
 
 @app.route('/api/box/<int:box_id>/add-item', methods=['POST'])
 @login_required
@@ -2074,6 +2052,98 @@ def api_add_item_to_box(box_id):
     except sqlite3.Error as e:
         conn.close()
         return jsonify({'error': 'Database error: ' + str(e)}), 500
+
+# ─── API: ANALYTICS ───────────────────────────────────────────────────────────
+
+@app.route('/api/analytics/summary')
+@login_required
+@role_required('admin')
+def api_analytics_summary():
+    try:
+        conn = get_db()
+        total_items    = conn.execute("SELECT COUNT(*) FROM inventory_items").fetchone()[0]
+        total_txns     = conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
+        total_borrowed = conn.execute("SELECT COALESCE(SUM(quantity_borrowed),0) FROM active_borrowings WHERE quantity_borrowed > 0").fetchone()[0]
+        active_users   = conn.execute("SELECT COUNT(DISTINCT user_id) FROM transactions WHERE timestamp >= datetime('now', '-30 days')").fetchone()[0]
+        out_of_stock   = conn.execute("SELECT COUNT(*) FROM inventory_items WHERE quantity = 0").fetchone()[0]
+        low_stock      = conn.execute("SELECT COUNT(*) FROM inventory_items WHERE quantity > 0 AND quantity <= min_stock").fetchone()[0]
+        healthy        = conn.execute("SELECT COUNT(*) FROM inventory_items WHERE quantity > min_stock").fetchone()[0]
+        conn.close()
+        return jsonify({'total_items': total_items, 'total_txns': total_txns,
+                        'total_borrowed': total_borrowed, 'active_users': active_users,
+                        'out_of_stock': out_of_stock, 'low_stock': low_stock, 'healthy': healthy})
+    except sqlite3.Error:
+        return jsonify({'error': 'Database error'}), 500
+
+@app.route('/api/analytics/usage')
+@login_required
+@role_required('admin')
+def api_analytics_usage():
+    try:
+        conn = get_db()
+        top_items = conn.execute("""
+            SELECT ii.item_name, COUNT(t.id) as take_count
+            FROM transactions t
+            JOIN inventory_items ii ON t.item_id = ii.id
+            WHERE t.type = 'take'
+            GROUP BY t.item_id
+            ORDER BY take_count DESC LIMIT 8
+        """).fetchall()
+        user_usage = conn.execute("""
+            SELECT u.name, COUNT(t.id) as txn_count
+            FROM transactions t
+            JOIN users u ON t.user_id = u.id
+            GROUP BY t.user_id
+            ORDER BY txn_count DESC LIMIT 8
+        """).fetchall()
+        top_borrowers = conn.execute("""
+            SELECT u.name, COUNT(ab.item_id) as item_count,
+                   SUM(ab.quantity_borrowed) as total_borrowed
+            FROM active_borrowings ab
+            JOIN users u ON ab.user_id = u.id
+            WHERE ab.quantity_borrowed > 0
+            GROUP BY ab.user_id
+            ORDER BY total_borrowed DESC LIMIT 6
+        """).fetchall()
+        conn.close()
+        return jsonify({'top_items': [dict(r) for r in top_items],
+                        'user_usage': [dict(r) for r in user_usage],
+                        'top_borrowers': [dict(r) for r in top_borrowers]})
+    except sqlite3.Error:
+        return jsonify({'error': 'Database error'}), 500
+
+@app.route('/api/analytics/daily')
+@login_required
+@role_required('admin')
+def api_analytics_daily():
+    try:
+        conn = get_db()
+        rows = conn.execute("""
+            SELECT DATE(timestamp) as day,
+                   SUM(CASE WHEN type='take'    THEN 1 ELSE 0 END) as takes,
+                   SUM(CASE WHEN type='return'  THEN 1 ELSE 0 END) as returns,
+                   SUM(CASE WHEN type='restock' THEN 1 ELSE 0 END) as restocks,
+                   COUNT(*) as total
+            FROM transactions
+            WHERE timestamp >= datetime('now', '-30 days')
+            GROUP BY DATE(timestamp)
+            ORDER BY day ASC
+        """).fetchall()
+        conn.close()
+        return jsonify([dict(r) for r in rows])
+    except sqlite3.Error:
+        return jsonify({'error': 'Database error'}), 500
+
+# ─── ERROR HANDLERS ───────────────────────────────────────────────────────────
+
+@app.errorhandler(404)
+def not_found(e):
+    return render_template('404.html'), 404
+
+@app.errorhandler(500)
+def server_error(e):
+    return render_template('500.html'), 500
+
 # ─── MAIN ─────────────────────────────────────────────────────────────────────
 init_db()
 if __name__ == '__main__':

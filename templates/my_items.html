@@ -28,6 +28,7 @@
             <th>Location</th>
             <th>Qty Borrowed</th>
             <th>In Stock</th>
+            <th>Type</th>
             <th>Last Updated</th>
             <th>Return</th>
           </tr>
@@ -49,19 +50,32 @@
                 {{ b['current_stock'] }}
               </span>
             </td>
+            <td>
+              {% if b['is_returnable'] == 0 %}
+                <span class="badge badge-warning">Non-Returnable</span>
+              {% else %}
+                <span class="badge badge-success">Returnable</span>
+              {% endif %}
+            </td>
             <td style="color:var(--text-muted);font-size:13px;white-space:nowrap">
               {{ b['updated_at'][:16] }}
             </td>
             <td>
-              <div style="display:flex;gap:6px;align-items:center">
-                <input type="number" id="qty-{{ b['item_id'] }}" value="{{ b['quantity_borrowed'] }}" min="1"
-                  max="{{ b['quantity_borrowed'] }}" style="width:60px;padding:4px 8px;font-size:13px;
-                              background:var(--surface2);border:1px solid var(--border);
-                              border-radius:var(--radius-sm);color:var(--text);text-align:center">
-                <button class="btn btn-success btn-sm" data-item-id="{{ b['item_id'] }}" onclick="returnItem(this)">
-                  Return
-                </button>
+              {% if b['is_returnable'] == 0 %}
+                <span style="color:var(--text-dim);font-size:12px;">Non-returnable</span>
+              {% else %}
+              <div style="display:flex;flex-direction:column;gap:6px;">
+                <div style="display:flex;gap:6px;align-items:center">
+                  <input type="number" id="qty-{{ b['item_id'] }}" value="{{ b['quantity_borrowed'] }}" min="1"
+                    max="{{ b['quantity_borrowed'] }}" style="width:60px;padding:4px 8px;font-size:13px;
+                                background:var(--surface2);border:1px solid var(--border);
+                                border-radius:var(--radius-sm);color:var(--text);text-align:center">
+                  <button class="btn btn-success btn-sm" data-item-id="{{ b['item_id'] }}" onclick="openReturnModal(this)">
+                    Return
+                  </button>
+                </div>
               </div>
+              {% endif %}
             </td>
           </tr>
           {% endfor %}
@@ -90,67 +104,124 @@
 </div>
 {% endif %}
 
+<!-- Return Modal -->
+<div id="returnModal" class="modal-overlay">
+  <div class="modal-box">
+    <div class="modal-title">Return Item</div>
+    <div style="margin-bottom:12px;">
+      <div style="font-size:13px;color:var(--text-muted);margin-bottom:4px;">Returning: <strong id="return-item-label" style="color:var(--text);"></strong></div>
+      <div style="font-size:12px;color:var(--text-dim);">Quantity: <span id="return-qty-label" style="font-family:var(--mono);color:var(--text-muted);"></span></div>
+    </div>
+    <div class="form-group">
+      <label>Project <span style="color:var(--text-dim);font-weight:400;">(optional)</span></label>
+      <select id="return-project-select">
+        <option value="">— Default (no project) —</option>
+      </select>
+    </div>
+    <div id="return-error" class="alert alert-error" style="display:none;margin-bottom:10px;"></div>
+    <div class="modal-actions">
+      <button class="btn btn-success" id="return-confirm-btn" onclick="submitReturn()">Confirm Return</button>
+      <button class="btn btn-secondary" onclick="closeReturnModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <script>
-  async function returnItem(btn) {
-    const itemId = parseInt(btn.dataset.itemId);
-    const qtyInput = document.getElementById('qty-' + itemId);
-    const qty = parseInt(qtyInput.value);
-    const max = parseInt(qtyInput.max);
+let _returnItemId = null;
+let _returnQty    = null;
+let _returnBtn    = null;
 
-    if (!qty || qty <= 0) {
-      showToast('Enter a valid quantity.', 'error');
-      return;
-    }
-    if (qty > max) {
-      showToast('You only have ' + max + ' unit(s) borrowed.', 'error');
-      return;
-    }
+async function loadProjects() {
+  try {
+    const res  = await fetch('/api/projects');
+    const data = await res.json();
+    const sel  = document.getElementById('return-project-select');
+    sel.innerHTML = '<option value="">— Default (no project) —</option>';
+    data.forEach(p => {
+      const opt = document.createElement('option');
+      opt.value       = p.id;
+      opt.textContent = p.name;
+      sel.appendChild(opt);
+    });
+  } catch (e) {}
+}
+loadProjects();
 
-    const origText = btn.textContent;
-    btn.textContent = '...';
-    btn.disabled = true;
+function openReturnModal(btn) {
+  const itemId  = parseInt(btn.dataset.itemId);
+  const row     = document.getElementById('row-' + itemId);
+  const qty     = parseInt(document.getElementById('qty-' + itemId).value);
+  const max     = parseInt(row.dataset.max);
+  const name    = row.querySelector('td strong').textContent;
 
-    try {
-      const res = await fetch('/api/quick-return', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ item_id: itemId, quantity: qty })
-      });
-      const data = await res.json();
+  if (!qty || qty <= 0) { showToast('Enter a valid quantity.', 'error'); return; }
+  if (qty > max)        { showToast('You only have ' + max + ' unit(s) borrowed.', 'error'); return; }
 
-      if (data.success) {
-        showToast(data.message, 'success');
-        if (data.remaining_borrowed <= 0) {
-          const row = document.getElementById('row-' + itemId);
-          if (row) {
-            row.style.opacity = '0';
-            row.style.transition = 'opacity 0.3s';
-            setTimeout(function () {
-              row.remove();
-              const tbody = document.getElementById('borrowTable');
-              if (tbody && tbody.children.length === 0) {
-                location.reload();
-              }
-            }, 300);
-          }
-        } else {
-          const badge = document.getElementById('badge-' + itemId);
-          if (badge) badge.textContent = data.remaining_borrowed;
-          qtyInput.max = data.remaining_borrowed;
-          qtyInput.value = data.remaining_borrowed;
-          btn.textContent = origText;
-          btn.disabled = false;
+  _returnItemId = itemId;
+  _returnQty    = qty;
+  _returnBtn    = btn;
+
+  document.getElementById('return-item-label').textContent = name;
+  document.getElementById('return-qty-label').textContent  = qty;
+  document.getElementById('return-error').style.display    = 'none';
+  document.getElementById('return-project-select').value   = '';
+  document.getElementById('returnModal').classList.add('open');
+}
+
+function closeReturnModal() {
+  document.getElementById('returnModal').classList.remove('open');
+  _returnItemId = null; _returnQty = null; _returnBtn = null;
+}
+
+async function submitReturn() {
+  const projectId = document.getElementById('return-project-select').value || null;
+  const errEl     = document.getElementById('return-error');
+  errEl.style.display = 'none';
+
+  const btn = document.getElementById('return-confirm-btn');
+  const origText = btn.textContent;
+  btn.textContent = '...'; btn.disabled = true;
+
+  try {
+    const res = await fetch('/api/quick-return', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ item_id: _returnItemId, quantity: _returnQty, project_id: projectId })
+    });
+    const data = await res.json();
+
+    if (data.success) {
+      closeReturnModal();
+      showToast(data.message, 'success');
+      if (data.remaining_borrowed <= 0) {
+        const row = document.getElementById('row-' + _returnItemId);
+        if (row) {
+          row.style.opacity = '0'; row.style.transition = 'opacity 0.3s';
+          setTimeout(function() {
+            row.remove();
+            const tbody = document.getElementById('borrowTable');
+            if (tbody && tbody.children.length === 0) location.reload();
+          }, 300);
         }
       } else {
-        showToast(data.error || 'Return failed.', 'error');
-        btn.textContent = origText;
-        btn.disabled = false;
+        const badge = document.getElementById('badge-' + _returnItemId);
+        if (badge) badge.textContent = data.remaining_borrowed;
+        const qtyInput = document.getElementById('qty-' + _returnItemId);
+        qtyInput.max = data.remaining_borrowed;
+        qtyInput.value = data.remaining_borrowed;
+        const rowEl = document.getElementById('row-' + _returnItemId);
+        if (rowEl) rowEl.dataset.max = data.remaining_borrowed;
       }
-    } catch (e) {
-      showToast('Network error. Please try again.', 'error');
-      btn.textContent = origText;
-      btn.disabled = false;
+    } else {
+      errEl.textContent = data.error || 'Return failed.';
+      errEl.style.display = 'block';
+      btn.textContent = origText; btn.disabled = false;
     }
+  } catch (e) {
+    errEl.textContent = 'Network error. Please try again.';
+    errEl.style.display = 'block';
+    btn.textContent = origText; btn.disabled = false;
   }
+}
 </script>
 {% endblock %}

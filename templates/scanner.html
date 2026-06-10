@@ -21,11 +21,9 @@
     </div>
     <div class="card-body">
       <div id="scanner-video-container" style="position:relative;width:100%;background:#000;border-radius:var(--radius);overflow:hidden;aspect-ratio:4/3;display:flex;align-items:center;justify-content:center;">
-        <video id="scanner-video" autoplay playsinline muted
-          style="width:100%;height:100%;object-fit:cover;display:none;"></video>
+        <video id="scanner-video" autoplay playsinline muted style="width:100%;height:100%;object-fit:cover;display:none;"></video>
         <canvas id="scanner-canvas" style="display:none;"></canvas>
 
-        <!-- Scan overlay -->
         <div id="scan-overlay" style="position:absolute;inset:0;display:none;align-items:center;justify-content:center;pointer-events:none;">
           <div style="position:relative;width:200px;height:200px;border:3px solid var(--accent);border-radius:12px;box-shadow:0 0 0 9999px rgba(0,0,0,0.45);">
             <div style="position:absolute;top:-3px;left:-3px;width:24px;height:24px;border-top:3px solid var(--accent);border-left:3px solid var(--accent);border-radius:4px 0 0 0;"></div>
@@ -35,20 +33,17 @@
           </div>
         </div>
 
-        <!-- Placeholder when camera off -->
         <div id="camera-placeholder" style="text-align:center;color:var(--text-muted);padding:32px;">
           <div style="font-size:48px;margin-bottom:12px;">⊡</div>
           <div style="font-size:14px;">Press "Start Camera" to begin scanning</div>
         </div>
 
-        <!-- Scan status -->
         <div id="scan-status" style="display:none;position:absolute;bottom:10px;left:50%;transform:translateX(-50%);
           background:rgba(0,0,0,0.75);color:var(--text);padding:6px 14px;border-radius:20px;font-size:13px;white-space:nowrap;">
           Scanning…
         </div>
       </div>
 
-      <!-- Manual entry fallback -->
       <div style="margin-top:12px;display:flex;gap:8px;align-items:center;">
         <input id="manual-col-id" type="number" placeholder="Or enter Column ID manually" min="1"
           style="flex:1;" onkeydown="if(event.key==='Enter') manualColumnEntry()">
@@ -86,6 +81,7 @@
       <button class="btn btn-sm btn-secondary" onclick="resetToItem()">← Back</button>
     </div>
     <div class="card-body">
+
       <!-- Item info -->
       <div style="background:var(--surface2);border-radius:var(--radius);padding:14px 16px;margin-bottom:16px;">
         <div id="txn-item-name" style="font-size:17px;font-weight:700;color:var(--text);margin-bottom:4px;"></div>
@@ -115,20 +111,47 @@
         {% endif %}
       </div>
 
-      <!-- Quantity input -->
+      <!-- Quantity + project + returnable panel -->
       <div id="qty-panel" style="display:none;">
         <div style="background:var(--surface2);border-radius:var(--radius);padding:14px 16px;">
           <div id="action-label" style="font-size:13px;color:var(--text-muted);margin-bottom:10px;"></div>
+
+          <!-- Quantity stepper -->
           <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
             <button class="btn btn-secondary" onclick="adjustQty(-1)"
               style="width:44px;height:44px;padding:0;font-size:20px;flex-shrink:0;">−</button>
             <input type="number" id="qty-input" value="1" min="1"
               style="flex:1;text-align:center;font-family:var(--mono);font-size:24px;font-weight:700;
-                padding:10px;background:var(--surface);border:2px solid var(--border2);border-radius:var(--radius-sm);color:var(--text);">
+                padding:10px;background:var(--surface);border:2px solid var(--border2);
+                border-radius:var(--radius-sm);color:var(--text);">
             <button class="btn btn-secondary" onclick="adjustQty(1)"
               style="width:44px;height:44px;padding:0;font-size:20px;flex-shrink:0;">+</button>
           </div>
+
+          <!-- Project selector (shown for take & return; hidden for restock) -->
+          <div id="project-section" style="margin-bottom:12px;">
+            <label style="font-size:12px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;display:block;">
+              Project
+            </label>
+            <select id="project-select"
+              style="width:100%;padding:9px 12px;background:var(--surface);border:1px solid var(--border2);
+                border-radius:var(--radius-sm);color:var(--text);font-family:var(--font);font-size:14px;">
+              <option value="">— Default (no project) —</option>
+            </select>
+          </div>
+
+          <!-- Returnable toggle (shown only for "take") -->
+          <div id="returnable-section" style="display:none;margin-bottom:12px;align-items:center;gap:12px;">
+            <label style="font-size:12px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.06em;">
+              Item Type
+            </label>
+            <button id="returnable-toggle" class="btn-toggle" onclick="toggleReturnable()">
+              ↩ Returnable
+            </button>
+          </div>
+
           <div id="txn-error" style="display:none;margin-bottom:10px;" class="alert alert-error"></div>
+
           <div style="display:flex;gap:10px;">
             <button id="confirm-btn" class="btn btn-primary" style="flex:1;" onclick="submitTransaction()">Confirm</button>
             <button class="btn btn-secondary" onclick="cancelAction()">Cancel</button>
@@ -163,11 +186,42 @@ let scanning        = false;
 let videoStream     = null;
 let animFrame       = null;
 let currentItem     = null;
+let isReturnable    = true;   // Feature 2: returnable toggle state
+
+// ─── Load projects into dropdown ──────────────────────────────────────────────
+async function loadProjects() {
+  try {
+    const res  = await fetch('/api/projects');
+    const data = await res.json();
+    const sel  = document.getElementById('project-select');
+    sel.innerHTML = '<option value="">— Default (no project) —</option>';
+    data.forEach(p => {
+      const opt = document.createElement('option');
+      opt.value       = p.id;
+      opt.textContent = p.name;
+      sel.appendChild(opt);
+    });
+  } catch (e) {
+    // silently fail — dropdown stays with "Default" only
+  }
+}
+loadProjects();
+
+// ─── Returnable toggle ────────────────────────────────────────────────────────
+function toggleReturnable() {
+  isReturnable = !isReturnable;
+  const btn = document.getElementById('returnable-toggle');
+  if (isReturnable) {
+    btn.textContent = '↩ Returnable';
+    btn.classList.remove('non-returnable');
+  } else {
+    btn.textContent = '✕ Non-Returnable';
+    btn.classList.add('non-returnable');
+  }
+}
 
 // ─── Camera ───────────────────────────────────────────────────────────────────
-async function toggleCamera() {
-  scanning ? stopCamera() : startCamera();
-}
+async function toggleCamera() { scanning ? stopCamera() : startCamera(); }
 
 async function startCamera() {
   const btn = document.getElementById('camera-toggle');
@@ -199,8 +253,7 @@ function stopCamera() {
   if (animFrame) cancelAnimationFrame(animFrame);
   if (videoStream) { videoStream.getTracks().forEach(t => t.stop()); videoStream = null; }
   const video = document.getElementById('scanner-video');
-  video.style.display = 'none';
-  video.srcObject = null;
+  video.style.display = 'none'; video.srcObject = null;
   document.getElementById('camera-placeholder').style.display = 'block';
   document.getElementById('scan-overlay').style.display = 'none';
   document.getElementById('scan-status').style.display = 'none';
@@ -214,8 +267,7 @@ function scanLoop() {
   const video  = document.getElementById('scanner-video');
   const canvas = document.getElementById('scanner-canvas');
   if (video.readyState === video.HAVE_ENOUGH_DATA) {
-    canvas.width  = video.videoWidth;
-    canvas.height = video.videoHeight;
+    canvas.width = video.videoWidth; canvas.height = video.videoHeight;
     const ctx = canvas.getContext('2d');
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
@@ -337,6 +389,8 @@ async function loadItem(itemId) {
 // ─── Action selection ─────────────────────────────────────────────────────────
 function selectAction(action) {
   selectedAction = action;
+  isReturnable   = true;  // reset toggle each time
+
   const labels = {
     take:    '📤 Taking from stock — enter quantity:',
     return:  '📥 Returning to stock — enter quantity:',
@@ -345,6 +399,20 @@ function selectAction(action) {
   document.getElementById('action-label').textContent = labels[action];
   document.getElementById('qty-input').value = 1;
   document.getElementById('txn-error').style.display = 'none';
+
+  // Project dropdown: shown for take & return, hidden for restock
+  document.getElementById('project-section').style.display =
+    (action === 'restock') ? 'none' : 'block';
+
+  // Returnable toggle: only shown on "take"
+  const retSec = document.getElementById('returnable-section');
+  retSec.style.display = (action === 'take') ? 'flex' : 'none';
+
+  // Reset toggle button state
+  const toggleBtn = document.getElementById('returnable-toggle');
+  toggleBtn.textContent = '↩ Returnable';
+  toggleBtn.classList.remove('non-returnable');
+
   document.getElementById('qty-panel').style.display = 'block';
   document.getElementById('qty-input').focus();
 }
@@ -376,13 +444,25 @@ async function submitTransaction() {
     return;
   }
 
+  const projectId = document.getElementById('project-select').value || null;
+
   const btn = document.getElementById('confirm-btn');
   setLoading(btn, true, 'Processing…');
 
-  const url  = selectedAction === 'restock' ? '/api/restock' : '/api/transaction';
-  const body = selectedAction === 'restock'
-    ? JSON.stringify({ item_id: selectedItemId, quantity: qty })
-    : JSON.stringify({ item_id: selectedItemId, quantity: qty, type: selectedAction });
+  let url, body;
+  if (selectedAction === 'restock') {
+    url  = '/api/restock';
+    body = JSON.stringify({ item_id: selectedItemId, quantity: qty, project_id: projectId });
+  } else {
+    url  = '/api/transaction';
+    body = JSON.stringify({
+      item_id:       selectedItemId,
+      quantity:      qty,
+      type:          selectedAction,
+      project_id:    projectId,
+      is_returnable: (selectedAction === 'take') ? (isReturnable ? 1 : 0) : 1
+    });
+  }
 
   try {
     const res  = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
@@ -404,9 +484,15 @@ async function submitTransaction() {
 // ─── Success overlay ──────────────────────────────────────────────────────────
 function showSuccess(data) {
   const labels = { take: 'Taken', return: 'Returned', restock: 'Restocked' };
-  const qty = parseInt(document.getElementById('qty-input').value);
+  const qty    = parseInt(document.getElementById('qty-input').value);
+  const proj   = document.getElementById('project-select');
+  const projLabel = proj.value ? ` for "${proj.options[proj.selectedIndex].text}"` : '';
+  const retLabel  = (!isReturnable && selectedAction === 'take') ? ' (Non-Returnable)' : '';
+
   document.getElementById('success-msg').textContent = (labels[selectedAction] || 'Done') + ' successfully!';
-  document.getElementById('success-sub').textContent = qty + ' × ' + currentItem.item_name + ' — New stock: ' + data.new_quantity;
+  document.getElementById('success-sub').textContent =
+    qty + ' × ' + currentItem.item_name + projLabel + retLabel + ' — New stock: ' + data.new_quantity;
+
   const overlay = document.getElementById('success-overlay');
   overlay.style.display = 'flex';
 }
@@ -414,7 +500,7 @@ function showSuccess(data) {
 function continueScanning() {
   document.getElementById('success-overlay').style.display = 'none';
   scannedColumnId = null; selectedBoxId = null; selectedItemId = null;
-  selectedAction = null; currentItem = null;
+  selectedAction  = null; currentItem   = null; isReturnable   = true;
   document.getElementById('step2').style.display = 'none';
   document.getElementById('step3').style.display = 'none';
   document.getElementById('step4').style.display = 'none';
