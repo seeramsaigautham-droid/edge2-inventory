@@ -510,20 +510,23 @@ def api_edit_user(user_id):
             "UPDATE users SET name=?, email=?, role=? WHERE id=?",
             (name, email, role, user_id)
         )
-    conn.commit()
+    conn.commit(
     conn.close()
     return jsonify({'success': True})
 
 # ─── ROUTES: MY ITEMS ─────────────────────────────────────────────────────────
 
+# ─── ROUTES: MY ITEMS ─────────────────────────────────────────────────────────
+
+
 @app.route('/my-items')
 @login_required
 def my_items():
     conn = get_db()
-   borrowings = conn.execute("""
+    borrowings = conn.execute("""
         SELECT ab.*, ii.item_name, ii.quantity as current_stock,
-               b.box_name, col.column_name, ii.id as inventory_item_id,
-               p.name as project_name
+        b.box_name, col.column_name, ii.id as inventory_item_id,
+        p.name as project_name
         FROM active_borrowings ab
         JOIN inventory_items ii ON ab.item_id = ii.id
         JOIN boxes b ON ii.box_id = b.id
