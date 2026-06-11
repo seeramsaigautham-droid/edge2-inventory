@@ -2013,6 +2013,36 @@ def api_quick_return():
         'message': f'Successfully returned {quantity} unit(s).'
     })
 
+# ─── API: TOGGLE RETURNABLE ───────────────────────────────────────────────────
+
+@app.route('/api/toggle-returnable', methods=['POST'])
+@login_required
+def api_toggle_returnable():
+    data    = request.get_json()
+    item_id = data.get('item_id')
+
+    if not item_id:
+        return jsonify({'error': 'item_id required'}), 400
+
+    conn = get_db()
+    borrowing = conn.execute(
+        "SELECT * FROM active_borrowings WHERE user_id=? AND item_id=?",
+        (session['user_id'], item_id)
+    ).fetchone()
+
+    if not borrowing or borrowing['quantity_borrowed'] <= 0:
+        conn.close()
+        return jsonify({'error': 'No active borrowing found'}), 404
+
+    new_val = 0 if borrowing['is_returnable'] == 1 else 1
+    conn.execute(
+        "UPDATE active_borrowings SET is_returnable=?, updated_at=CURRENT_TIMESTAMP WHERE user_id=? AND item_id=?",
+        (new_val, session['user_id'], item_id)
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True, 'is_returnable': new_val})
+
 # ─── API: BOX ADD ITEM ────────────────────────────────────────────────────────
 
 @app.route('/api/box/<int:box_id>/add-item', methods=['POST'])

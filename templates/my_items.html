@@ -51,29 +51,31 @@
               </span>
             </td>
             <td>
-              {% if b['is_returnable'] == 0 %}
-                <span class="badge badge-warning">Non-Returnable</span>
-              {% else %}
-                <span class="badge badge-success">Returnable</span>
-              {% endif %}
+              <button
+                class="badge {% if b['is_returnable'] == 0 %}badge-warning{% else %}badge-success{% endif %} toggle-type-btn"
+                data-item-id="{{ b['item_id'] }}"
+                data-returnable="{{ b['is_returnable'] }}"
+                onclick="toggleReturnable(this)"
+                title="Click to toggle"
+                style="cursor:pointer;border:none;padding:4px 10px;font-size:12px;font-weight:600;letter-spacing:.3px">
+                {% if b['is_returnable'] == 0 %}Non-Returnable{% else %}Returnable{% endif %}
+              </button>
             </td>
             <td style="color:var(--text-muted);font-size:13px;white-space:nowrap">
               {{ b['updated_at'][:16] }}
             </td>
-            <td>
+            <td id="return-cell-{{ b['item_id'] }}">
               {% if b['is_returnable'] == 0 %}
-                <span style="color:var(--text-dim);font-size:12px;">Non-returnable</span>
+                <span class="non-returnable-label" style="color:var(--text-dim);font-size:12px;">Non-returnable</span>
               {% else %}
-              <div style="display:flex;flex-direction:column;gap:6px;">
-                <div style="display:flex;gap:6px;align-items:center">
-                  <input type="number" id="qty-{{ b['item_id'] }}" value="{{ b['quantity_borrowed'] }}" min="1"
-                    max="{{ b['quantity_borrowed'] }}" style="width:60px;padding:4px 8px;font-size:13px;
-                                background:var(--surface2);border:1px solid var(--border);
-                                border-radius:var(--radius-sm);color:var(--text);text-align:center">
-                  <button class="btn btn-success btn-sm" data-item-id="{{ b['item_id'] }}" onclick="openReturnModal(this)">
-                    Return
-                  </button>
-                </div>
+              <div style="display:flex;gap:6px;align-items:center">
+                <input type="number" id="qty-{{ b['item_id'] }}" value="{{ b['quantity_borrowed'] }}" min="1"
+                  max="{{ b['quantity_borrowed'] }}" style="width:60px;padding:4px 8px;font-size:13px;
+                              background:var(--surface2);border:1px solid var(--border);
+                              border-radius:var(--radius-sm);color:var(--text);text-align:center">
+                <button class="btn btn-success btn-sm" data-item-id="{{ b['item_id'] }}" onclick="openReturnModal(this)">
+                  Return
+                </button>
               </div>
               {% endif %}
             </td>
@@ -222,6 +224,63 @@ async function submitReturn() {
     errEl.style.display = 'block';
     btn.textContent = origText; btn.disabled = false;
   }
+}
+async function toggleReturnable(btn) {
+  const itemId      = parseInt(btn.dataset.itemId);
+  const isReturnable = parseInt(btn.dataset.returnable);
+  const newVal      = isReturnable === 1 ? 0 : 1;
+
+  btn.disabled = true;
+  btn.style.opacity = '0.5';
+
+  try {
+    const res  = await fetch('/api/toggle-returnable', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ item_id: itemId })
+    });
+    const data = await res.json();
+
+    if (data.success) {
+      // Update badge
+      btn.dataset.returnable = data.is_returnable;
+      if (data.is_returnable === 0) {
+        btn.textContent = 'Non-Returnable';
+        btn.className   = 'badge badge-warning toggle-type-btn';
+      } else {
+        btn.textContent = 'Returnable';
+        btn.className   = 'badge badge-success toggle-type-btn';
+      }
+
+      // Update Return cell
+      const cell = document.getElementById('return-cell-' + itemId);
+      if (cell) {
+        if (data.is_returnable === 0) {
+          cell.innerHTML = '<span class="non-returnable-label" style="color:var(--text-dim);font-size:12px;">Non-returnable</span>';
+        } else {
+          const maxQty = parseInt(document.getElementById('row-' + itemId).dataset.max);
+          cell.innerHTML = `
+            <div style="display:flex;gap:6px;align-items:center">
+              <input type="number" id="qty-${itemId}" value="${maxQty}" min="1" max="${maxQty}"
+                style="width:60px;padding:4px 8px;font-size:13px;background:var(--surface2);
+                       border:1px solid var(--border);border-radius:var(--radius-sm);
+                       color:var(--text);text-align:center">
+              <button class="btn btn-success btn-sm" data-item-id="${itemId}" onclick="openReturnModal(this)">
+                Return
+              </button>
+            </div>`;
+        }
+      }
+      showToast(data.is_returnable === 0 ? 'Marked as Non-Returnable' : 'Marked as Returnable', 'success');
+    } else {
+      showToast(data.error || 'Toggle failed.', 'error');
+    }
+  } catch (e) {
+    showToast('Network error.', 'error');
+  }
+
+  btn.disabled    = false;
+  btn.style.opacity = '1';
 }
 </script>
 {% endblock %}
