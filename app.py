@@ -510,7 +510,7 @@ def api_edit_user(user_id):
             "UPDATE users SET name=?, email=?, role=? WHERE id=?",
             (name, email, role, user_id)
         )
-    conn.commit(
+    conn.commit()
     conn.close()
     return jsonify({'success': True})
 
