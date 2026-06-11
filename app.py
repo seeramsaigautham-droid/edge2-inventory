@@ -520,16 +520,25 @@ def api_edit_user(user_id):
 @login_required
 def my_items():
     conn = get_db()
-    borrowings = conn.execute("""
+   borrowings = conn.execute("""
         SELECT ab.*, ii.item_name, ii.quantity as current_stock,
-               b.box_name, col.column_name, ii.id as inventory_item_id
+               b.box_name, col.column_name, ii.id as inventory_item_id,
+               p.name as project_name
         FROM active_borrowings ab
         JOIN inventory_items ii ON ab.item_id = ii.id
         JOIN boxes b ON ii.box_id = b.id
         JOIN columns col ON b.column_id = col.id
+        LEFT JOIN (
+            SELECT item_id, project_id
+            FROM transactions
+            WHERE user_id = ? AND type = 'take'
+            GROUP BY item_id
+            HAVING MAX(timestamp)
+        ) last_txn ON last_txn.item_id = ab.item_id
+        LEFT JOIN projects p ON p.id = last_txn.project_id
         WHERE ab.user_id = ? AND ab.quantity_borrowed > 0
         ORDER BY ab.updated_at DESC
-    """, (session['user_id'],)).fetchall()
+    """, (session['user_id'], session['user_id'],)).fetchall()
     projects = conn.execute("SELECT id, name FROM projects ORDER BY name").fetchall()
     conn.close()
     return render_template('my_items.html', borrowings=borrowings, projects=projects)

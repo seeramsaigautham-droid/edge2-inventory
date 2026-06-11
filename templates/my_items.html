@@ -29,6 +29,7 @@
             <th>Qty Borrowed</th>
             <th>In Stock</th>
             <th>Type</th>
+            <th>Project</th>
             <th>Last Updated</th>
             <th>Return</th>
           </tr>
@@ -60,6 +61,13 @@
                 style="cursor:pointer;border:none;padding:4px 10px;font-size:12px;font-weight:600;letter-spacing:.3px">
                 {% if b['is_returnable'] == 0 %}Non-Returnable{% else %}Returnable{% endif %}
               </button>
+            </td>
+            <td style="font-size:13px">
+              {% if b['project_name'] %}
+              <span style="color:var(--accent)">{{ b['project_name'] }}</span>
+              {% else %}
+              <span style="color:var(--text-dim)">Default</span>
+              {% endif %}
             </td>
             <td style="color:var(--text-muted);font-size:13px;white-space:nowrap">
               {{ b['updated_at'][:16] }}
