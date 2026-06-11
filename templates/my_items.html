@@ -122,12 +122,7 @@
       <div style="font-size:13px;color:var(--text-muted);margin-bottom:4px;">Returning: <strong id="return-item-label" style="color:var(--text);"></strong></div>
       <div style="font-size:12px;color:var(--text-dim);">Quantity: <span id="return-qty-label" style="font-family:var(--mono);color:var(--text-muted);"></span></div>
     </div>
-    <div class="form-group">
-      <label>Project <span style="color:var(--text-dim);font-weight:400;">(optional)</span></label>
-      <select id="return-project-select">
-        <option value="">— Default (no project) —</option>
-      </select>
-    </div>
+
     <div id="return-error" class="alert alert-error" style="display:none;margin-bottom:10px;"></div>
     <div class="modal-actions">
       <button class="btn btn-success" id="return-confirm-btn" onclick="submitReturn()">Confirm Return</button>
@@ -141,21 +136,7 @@ let _returnItemId = null;
 let _returnQty    = null;
 let _returnBtn    = null;
 
-async function loadProjects() {
-  try {
-    const res  = await fetch('/api/projects');
-    const data = await res.json();
-    const sel  = document.getElementById('return-project-select');
-    sel.innerHTML = '<option value="">— Default (no project) —</option>';
-    data.forEach(p => {
-      const opt = document.createElement('option');
-      opt.value       = p.id;
-      opt.textContent = p.name;
-      sel.appendChild(opt);
-    });
-  } catch (e) {}
-}
-loadProjects();
+
 
 function openReturnModal(btn) {
   const itemId  = parseInt(btn.dataset.itemId);
@@ -174,7 +155,6 @@ function openReturnModal(btn) {
   document.getElementById('return-item-label').textContent = name;
   document.getElementById('return-qty-label').textContent  = qty;
   document.getElementById('return-error').style.display    = 'none';
-  document.getElementById('return-project-select').value   = '';
   document.getElementById('returnModal').classList.add('open');
 }
 
@@ -184,7 +164,7 @@ function closeReturnModal() {
 }
 
 async function submitReturn() {
-  const projectId = document.getElementById('return-project-select').value || null;
+  const projectId = null;
   const errEl     = document.getElementById('return-error');
   errEl.style.display = 'none';
 
