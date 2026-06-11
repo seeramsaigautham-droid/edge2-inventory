@@ -581,8 +581,36 @@ def projects():
         GROUP BY p.id
         ORDER BY p.name
     """).fetchall()
+
+    # For each project, get users and their items
+    project_details = {}
+    for p in all_projects:
+        users = conn.execute("""
+            SELECT DISTINCT u.id, u.name
+            FROM transactions t
+            JOIN users u ON t.user_id = u.id
+            WHERE t.project_id = ? AND t.type = 'take'
+            ORDER BY u.name
+        """, (p['id'],)).fetchall()
+
+        user_items = {}
+        for u in users:
+            items = conn.execute("""
+                SELECT ii.item_name, t.quantity, t.is_returnable, t.timestamp
+                FROM transactions t
+                JOIN inventory_items ii ON t.item_id = ii.id
+                WHERE t.project_id = ? AND t.user_id = ? AND t.type = 'take'
+                ORDER BY t.timestamp DESC
+            """, (p['id'], u['id'])).fetchall()
+            user_items[u['id']] = [dict(i) for i in items]
+
+        project_details[p['id']] = {
+            'users': [dict(u) for u in users],
+            'user_items': user_items
+        }
+
     conn.close()
-    return render_template('projects.html', projects=all_projects)
+    return render_template('projects.html', projects=all_projects, project_details=project_details)
 
 @app.route('/projects/add', methods=['GET', 'POST'])
 @login_required

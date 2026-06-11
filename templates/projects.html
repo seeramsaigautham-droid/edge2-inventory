@@ -1,13 +1,12 @@
-{% extends "base.html" %}
-{% block title %}Projects — Edge2 Inventory{% endblock %}
-{% block page_title %}Projects{% endblock %}
-{% block page_meta %}Manage projects{% endblock %}
-
-{% block content %}
+{% extends "base.html" %} {% block title %}Projects — Edge2 Inventory{% endblock
+%} {% block page_title %}Projects{% endblock %} {% block page_meta %}Manage
+projects{% endblock %} {% block content %}
 <div class="page-header">
   <h2>Projects</h2>
   {% if session.get('role') in ('admin', 'storekeeper') %}
-  <a href="{{ url_for('add_project') }}" class="btn btn-primary">+ New Project</a>
+  <a href="{{ url_for('add_project') }}" class="btn btn-primary"
+    >+ New Project</a
+  >
   {% endif %}
 </div>
 
@@ -25,28 +24,236 @@
           <th>Actions</th>
         </tr>
       </thead>
+
       <tbody>
         {% for p in projects %}
         <tr>
-          <td class="mono" style="color:var(--text-dim);">{{ p.id }}</td>
-          <td style="font-weight:600;">{{ p.name }}</td>
-          <td style="color:var(--text-muted);font-size:13px;">{{ p.description or '—' }}</td>
+          <td class="mono" style="color: var(--text-dim)">{{ p.id }}</td>
           <td>
-            <span class="badge badge-info">{{ p.txn_count }}</span>
+            <button
+              onclick="toggleProject(this)"
+              data-proj-id="{{ p.id }}"
+              style="
+                background: none;
+                border: none;
+                color: var(--accent);
+                font-weight: 600;
+                font-size: 14px;
+                cursor: pointer;
+                padding: 0;
+                text-align: left;
+              "
+            >
+              {{ p.name }}
+              <span id="arrow-{{ p.id }}" style="font-size: 11px">▶</span>
+            </button>
           </td>
-          <td style="color:var(--text-muted);font-size:12.5px;white-space:nowrap;">{{ p.created_at[:10] }}</td>
+          <td style="color: var(--text-muted); font-size: 13px">
+            {{ p.description or '—' }}
+          </td>
+          <td><span class="badge badge-info">{{ p.txn_count }}</span></td>
+          <td
+            style="
+              color: var(--text-muted);
+              font-size: 12.5px;
+              white-space: nowrap;
+            "
+          >
+            {{ p.created_at[:10] }}
+          </td>
           <td>
-            <div style="display:flex;gap:6px;">
+            <div style="display: flex; gap: 6px">
               {% if session.get('role') in ('admin', 'storekeeper') %}
-              <a href="{{ url_for('edit_project', project_id=p.id) }}" class="btn btn-secondary btn-sm">Edit</a>
-              {% endif %}
-              {% if session.get('role') == 'admin' %}
-              <form id="del-proj-{{ p.id }}" method="POST" action="{{ url_for('delete_project', project_id=p.id) }}">
-                <button type="button" class="btn btn-danger btn-sm"
-                  onclick="openConfirm('Delete project &quot;{{ p.name }}&quot;? This cannot be undone.', 'del-proj-{{ p.id }}', 'Delete')">
+              <a
+                href="{{ url_for('edit_project', project_id=p.id) }}"
+                class="btn btn-secondary btn-sm"
+                >Edit</a
+              >
+              {% endif %} {% if session.get('role') == 'admin' %}
+              <form
+                id="del-proj-{{ p.id }}"
+                method="POST"
+                action="{{ url_for('delete_project', project_id=p.id) }}"
+              >
+                <button
+                  type="button"
+                  class="btn btn-danger btn-sm"
+                  onclick="openConfirm('Delete project &quot;{{ p.name }}&quot;? This cannot be undone.', 'del-proj-{{ p.id }}', 'Delete')"
+                >
                   Delete
                 </button>
               </form>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+
+        <!-- Project drill-down row -->
+        <tr id="proj-detail-{{ p.id }}" style="display: none">
+          <td
+            colspan="6"
+            style="
+              padding: 0;
+              background: var(--surface2);
+              border-bottom: 2px solid var(--border);
+            "
+          >
+            <div style="padding: 16px 24px">
+              {% set detail = project_details[p.id] %} {% if detail.users %} {%
+              for u in detail.users %}
+              <div
+                style="
+                  margin-bottom: 12px;
+                  border: 1px solid var(--border);
+                  border-radius: var(--radius);
+                  overflow: hidden;
+                "
+              >
+                <button
+                  onclick="toggleUser(this)"
+                  data-proj-id="{{ p.id }}"
+                  data-user-id="{{ u.id }}"
+                  style="
+                    width: 100%;
+                    background: var(--surface);
+                    border: none;
+                    padding: 12px 16px;
+                    display: flex;
+                    align-items: center;
+                    gap: 10px;
+                    cursor: pointer;
+                    text-align: left;
+                  "
+                >
+                  <span style="color: var(--accent); font-size: 16px">👤</span>
+                  <span
+                    style="
+                      font-weight: 600;
+                      color: var(--text);
+                      font-size: 14px;
+                    "
+                    >{{ u.name }}</span
+                  >
+                  <span
+                    id="user-arrow-{{ p.id }}-{{ u.id }}"
+                    style="
+                      color: var(--text-muted);
+                      font-size: 11px;
+                      margin-left: auto;
+                    "
+                    >▶</span
+                  >
+                </button>
+
+                <!-- User items -->
+                <div
+                  id="user-detail-{{ p.id }}-{{ u.id }}"
+                  style="display: none; padding: 0 16px 16px"
+                >
+                  <table style="width: 100%; margin-top: 8px">
+                    <thead>
+                      <tr style="border-bottom: 1px solid var(--border)">
+                        <th
+                          style="
+                            padding: 8px 12px;
+                            text-align: left;
+                            font-size: 12px;
+                            color: var(--text-muted);
+                            font-weight: 500;
+                          "
+                        >
+                          Item
+                        </th>
+                        <th
+                          style="
+                            padding: 8px 12px;
+                            text-align: left;
+                            font-size: 12px;
+                            color: var(--text-muted);
+                            font-weight: 500;
+                          "
+                        >
+                          Type
+                        </th>
+                        <th
+                          style="
+                            padding: 8px 12px;
+                            text-align: left;
+                            font-size: 12px;
+                            color: var(--text-muted);
+                            font-weight: 500;
+                          "
+                        >
+                          Quantity
+                        </th>
+                        <th
+                          style="
+                            padding: 8px 12px;
+                            text-align: left;
+                            font-size: 12px;
+                            color: var(--text-muted);
+                            font-weight: 500;
+                          "
+                        >
+                          Date
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {% for item in detail.user_items[u.id] %}
+                      <tr style="border-bottom: 1px solid var(--border2)">
+                        <td
+                          style="
+                            padding: 8px 12px;
+                            font-size: 13px;
+                            font-weight: 500;
+                          "
+                        >
+                          {{ item.item_name }}
+                        </td>
+                        <td style="padding: 8px 12px">
+                          {% if item.is_returnable == 0 %}
+                          <span class="badge badge-warning"
+                            >Non-Returnable</span
+                          >
+                          {% else %}
+                          <span class="badge badge-success">Returnable</span>
+                          {% endif %}
+                        </td>
+                        <td
+                          style="
+                            padding: 8px 12px;
+                            font-family: var(--mono);
+                            font-size: 13px;
+                          "
+                        >
+                          {{ item.quantity }}
+                        </td>
+                        <td
+                          style="
+                            padding: 8px 12px;
+                            font-size: 12px;
+                            color: var(--text-muted);
+                          "
+                        >
+                          {{ item.timestamp[:16] }}
+                        </td>
+                      </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              {% endfor %} {% else %}
+              <div
+                style="
+                  color: var(--text-muted);
+                  font-size: 13px;
+                  padding: 8px 0;
+                "
+              >
+                No take transactions recorded for this project.
+              </div>
               {% endif %}
             </div>
           </td>
@@ -59,11 +266,41 @@
   <div class="empty-state">
     <div class="empty-icon">◑</div>
     <div class="empty-title">No projects yet</div>
-    <div class="empty-sub">Create a project to start tracking item usage by project.</div>
+    <div class="empty-sub">
+      Create a project to start tracking item usage by project.
+    </div>
     {% if session.get('role') in ('admin', 'storekeeper') %}
-    <a href="{{ url_for('add_project') }}" class="btn btn-primary" style="margin-top:16px;">+ New Project</a>
+    <a
+      href="{{ url_for('add_project') }}"
+      class="btn btn-primary"
+      style="margin-top: 16px"
+      >+ New Project</a
+    >
     {% endif %}
   </div>
   {% endif %}
 </div>
+
+<script>
+  function toggleProject(btn) {
+    const projId = btn.dataset.projId;
+    const row = document.getElementById("proj-detail-" + projId);
+    const arrow = document.getElementById("arrow-" + projId);
+    const open = row.style.display === "none" || row.style.display === "";
+    row.style.display = open ? "table-row" : "none";
+    arrow.textContent = open ? "▼" : "▶";
+  }
+
+  function toggleUser(btn) {
+    const projId = btn.dataset.projId;
+    const userId = btn.dataset.userId;
+    const div = document.getElementById("user-detail-" + projId + "-" + userId);
+    const arrow = document.getElementById(
+      "user-arrow-" + projId + "-" + userId,
+    );
+    const open = div.style.display === "none" || div.style.display === "";
+    div.style.display = open ? "block" : "none";
+    arrow.textContent = open ? "▼" : "▶";
+  }
+</script>
 {% endblock %}
