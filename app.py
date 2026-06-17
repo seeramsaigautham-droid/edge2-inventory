@@ -7,6 +7,9 @@ import qrcode
 import io
 import csv
 from datetime import datetime
+import requests as _requests
+import threading
+
 
 app = Flask(__name__)
 app.secret_key = 'edge2systems_inventory_secret_2024'
@@ -25,8 +28,29 @@ def get_db():
 
 def hash_password(pw):
     return hashlib.sha256(pw.encode()).hexdigest()
+# ─── PI LED HELPER ────────────────────────────────────────────────────────────
+def trigger_led(column_name):
+    """Fire-and-forget POST to Raspberry Pi LED API."""
+    pi_url   = os.environ.get('PI_API_URL', '').rstrip('/')
+    pi_token = os.environ.get('PI_API_TOKEN', '')
+    if not pi_url:
+        return  # silently skip if not configured
 
-# ─── AUTH DECORATORS ──────────────────────────────────────────────────────────
+    # Extract the letter: "Column A" → "A"
+    letter = column_name.strip().split()[-1].upper()
+
+    def _send():
+        try:
+            _requests.post(
+                f'{pi_url}/led',
+                json={'column': letter},
+                headers={'Authorization': f'Bearer {pi_token}'},
+                timeout=4
+            )
+        except Exception:
+            pass  # Pi offline — don't break the app
+
+    threading.Thread(target=_send, daemon=True).start()
 
 def login_required(f):
     @wraps(f)
@@ -35,6 +59,18 @@ def login_required(f):
             return redirect(url_for('login'))
         return f(*args, **kwargs)
     return decorated
+
+    
+@app.route('/api/trigger-led', methods=['POST'])
+@login_required
+def api_trigger_led():
+    data        = request.get_json() or {}
+    column_name = data.get('column', '')
+    if column_name:
+        trigger_led(column_name)
+    return jsonify({'ok': True})
+# ─── AUTH DECORATORS ──────────────────────────────────────────────────────────
+
 
 def role_required(*roles):
     def decorator(f):

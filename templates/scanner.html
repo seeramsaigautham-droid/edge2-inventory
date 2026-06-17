@@ -20,12 +20,16 @@
       <button id="camera-toggle" class="btn btn-primary btn-sm" onclick="toggleCamera()">Start Camera</button>
     </div>
     <div class="card-body">
-      <div id="scanner-video-container" style="position:relative;width:100%;background:#000;border-radius:var(--radius);overflow:hidden;aspect-ratio:4/3;display:flex;align-items:center;justify-content:center;">
-        <video id="scanner-video" autoplay playsinline muted style="width:100%;height:100%;object-fit:cover;display:none;"></video>
+      <div id="scanner-video-container"
+        style="position:relative;width:100%;background:#000;border-radius:var(--radius);overflow:hidden;aspect-ratio:4/3;display:flex;align-items:center;justify-content:center;">
+        <video id="scanner-video" autoplay playsinline muted
+          style="width:100%;height:100%;object-fit:cover;display:none;"></video>
         <canvas id="scanner-canvas" style="display:none;"></canvas>
 
-        <div id="scan-overlay" style="position:absolute;inset:0;display:none;align-items:center;justify-content:center;pointer-events:none;">
-          <div style="position:relative;width:200px;height:200px;border:3px solid var(--accent);border-radius:12px;box-shadow:0 0 0 9999px rgba(0,0,0,0.45);">
+        <div id="scan-overlay"
+          style="position:absolute;inset:0;display:none;align-items:center;justify-content:center;pointer-events:none;">
+          <div
+            style="position:relative;width:200px;height:200px;border:3px solid var(--accent);border-radius:12px;box-shadow:0 0 0 9999px rgba(0,0,0,0.45);">
             <div style="position:absolute;top:-3px;left:-3px;width:24px;height:24px;border-top:3px solid var(--accent);border-left:3px solid var(--accent);border-radius:4px 0 0 0;"></div>
             <div style="position:absolute;top:-3px;right:-3px;width:24px;height:24px;border-top:3px solid var(--accent);border-right:3px solid var(--accent);border-radius:0 4px 0 0;"></div>
             <div style="position:absolute;bottom:-3px;left:-3px;width:24px;height:24px;border-bottom:3px solid var(--accent);border-left:3px solid var(--accent);border-radius:0 0 0 4px;"></div>
@@ -38,15 +42,16 @@
           <div style="font-size:14px;">Press "Start Camera" to begin scanning</div>
         </div>
 
-        <div id="scan-status" style="display:none;position:absolute;bottom:10px;left:50%;transform:translateX(-50%);
+        <div id="scan-status"
+          style="display:none;position:absolute;bottom:10px;left:50%;transform:translateX(-50%);
           background:rgba(0,0,0,0.75);color:var(--text);padding:6px 14px;border-radius:20px;font-size:13px;white-space:nowrap;">
           Scanning…
         </div>
       </div>
 
       <div style="margin-top:12px;display:flex;gap:8px;align-items:center;">
-        <input id="manual-col-id" type="number" placeholder="Or enter Column ID manually" min="1"
-          style="flex:1;" onkeydown="if(event.key==='Enter') manualColumnEntry()">
+        <input id="manual-col-id" type="number" placeholder="Or enter Column ID manually" min="1" style="flex:1;"
+          onkeydown="if(event.key==='Enter') manualColumnEntry()">
         <button class="btn btn-secondary btn-sm" onclick="manualColumnEntry()">Go</button>
       </div>
     </div>
@@ -177,350 +182,355 @@
 
 <script src="{{ url_for('static', filename='js/jsQR.min.js') }}"></script>
 <script>
-// ─── State ────────────────────────────────────────────────────────────────────
-let scannedColumnId = null;
-let selectedBoxId   = null;
-let selectedItemId  = null;
-let selectedAction  = null;
-let scanning        = false;
-let videoStream     = null;
-let animFrame       = null;
-let currentItem     = null;
-let isReturnable    = true;   // Feature 2: returnable toggle state
+  // ─── State ────────────────────────────────────────────────────────────────────
+  let scannedColumnId = null;
+  let selectedBoxId   = null;
+  let selectedItemId  = null;
+  let selectedAction  = null;
+  let scanning        = false;
+  let videoStream     = null;
+  let animFrame       = null;
+  let currentItem     = null;
+  let isReturnable    = true;
 
-// ─── Load projects into dropdown ──────────────────────────────────────────────
-async function loadProjects() {
-  try {
-    const res  = await fetch('/api/projects');
-    const data = await res.json();
-    const sel  = document.getElementById('project-select');
-    sel.innerHTML = '<option value="">— Default (no project) —</option>';
-    data.forEach(p => {
-      const opt = document.createElement('option');
-      opt.value       = p.id;
-      opt.textContent = p.name;
-      sel.appendChild(opt);
-    });
-  } catch (e) {
-    // silently fail — dropdown stays with "Default" only
+  // ─── LED trigger helper ───────────────────────────────────────────────────────
+  function triggerLED(columnName) {
+    fetch('/api/trigger-led', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ column: columnName })
+    }).catch(() => {});  // silently ignore if Pi is offline
   }
-}
-loadProjects();
 
-// ─── Returnable toggle ────────────────────────────────────────────────────────
-function toggleReturnable() {
-  isReturnable = !isReturnable;
-  const btn = document.getElementById('returnable-toggle');
-  if (isReturnable) {
-    btn.textContent = '↩ Returnable';
-    btn.classList.remove('non-returnable');
-  } else {
-    btn.textContent = '✕ Non-Returnable';
-    btn.classList.add('non-returnable');
+  // ─── Load projects into dropdown ──────────────────────────────────────────────
+  async function loadProjects() {
+    try {
+      const res  = await fetch('/api/projects');
+      const data = await res.json();
+      const sel  = document.getElementById('project-select');
+      sel.innerHTML = '<option value="">— Default (no project) —</option>';
+      data.forEach(p => {
+        const opt = document.createElement('option');
+        opt.value       = p.id;
+        opt.textContent = p.name;
+        sel.appendChild(opt);
+      });
+    } catch (e) {}
   }
-}
+  loadProjects();
 
-// ─── Camera ───────────────────────────────────────────────────────────────────
-async function toggleCamera() { scanning ? stopCamera() : startCamera(); }
+  // ─── Returnable toggle ────────────────────────────────────────────────────────
+  function toggleReturnable() {
+    isReturnable = !isReturnable;
+    const btn = document.getElementById('returnable-toggle');
+    if (isReturnable) {
+      btn.textContent = '↩ Returnable';
+      btn.classList.remove('non-returnable');
+    } else {
+      btn.textContent = '✕ Non-Returnable';
+      btn.classList.add('non-returnable');
+    }
+  }
 
-async function startCamera() {
-  const btn = document.getElementById('camera-toggle');
-  setLoading(btn, true, 'Starting…');
-  try {
-    videoStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
-    });
+  // ─── Camera ───────────────────────────────────────────────────────────────────
+  async function toggleCamera() { scanning ? stopCamera() : startCamera(); }
+
+  async function startCamera() {
+    const btn = document.getElementById('camera-toggle');
+    setLoading(btn, true, 'Starting…');
+    try {
+      videoStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+      });
+      const video = document.getElementById('scanner-video');
+      video.srcObject = videoStream;
+      video.style.display = 'block';
+      document.getElementById('camera-placeholder').style.display = 'none';
+      document.getElementById('scan-overlay').style.display = 'flex';
+      document.getElementById('scan-status').style.display = 'block';
+      scanning = true;
+      setLoading(btn, false);
+      btn.textContent = 'Stop Camera';
+      btn.classList.replace('btn-primary', 'btn-danger');
+      requestAnimationFrame(scanLoop);
+    } catch (err) {
+      setLoading(btn, false);
+      btn.textContent = 'Start Camera';
+      showToast('Camera access denied or unavailable.', 'error');
+    }
+  }
+
+  function stopCamera() {
+    scanning = false;
+    if (animFrame) cancelAnimationFrame(animFrame);
+    if (videoStream) { videoStream.getTracks().forEach(t => t.stop()); videoStream = null; }
     const video = document.getElementById('scanner-video');
-    video.srcObject = videoStream;
-    video.style.display = 'block';
-    document.getElementById('camera-placeholder').style.display = 'none';
-    document.getElementById('scan-overlay').style.display = 'flex';
-    document.getElementById('scan-status').style.display = 'block';
-    scanning = true;
-    setLoading(btn, false);
-    btn.textContent = 'Stop Camera';
-    btn.classList.replace('btn-primary', 'btn-danger');
-    requestAnimationFrame(scanLoop);
-  } catch (err) {
-    setLoading(btn, false);
+    video.style.display = 'none'; video.srcObject = null;
+    document.getElementById('camera-placeholder').style.display = 'block';
+    document.getElementById('scan-overlay').style.display = 'none';
+    document.getElementById('scan-status').style.display = 'none';
+    const btn = document.getElementById('camera-toggle');
     btn.textContent = 'Start Camera';
-    showToast('Camera access denied or unavailable.', 'error');
+    btn.classList.replace('btn-danger', 'btn-primary');
   }
-}
 
-function stopCamera() {
-  scanning = false;
-  if (animFrame) cancelAnimationFrame(animFrame);
-  if (videoStream) { videoStream.getTracks().forEach(t => t.stop()); videoStream = null; }
-  const video = document.getElementById('scanner-video');
-  video.style.display = 'none'; video.srcObject = null;
-  document.getElementById('camera-placeholder').style.display = 'block';
-  document.getElementById('scan-overlay').style.display = 'none';
-  document.getElementById('scan-status').style.display = 'none';
-  const btn = document.getElementById('camera-toggle');
-  btn.textContent = 'Start Camera';
-  btn.classList.replace('btn-danger', 'btn-primary');
-}
-
-function scanLoop() {
-  if (!scanning) return;
-  const video  = document.getElementById('scanner-video');
-  const canvas = document.getElementById('scanner-canvas');
-  if (video.readyState === video.HAVE_ENOUGH_DATA) {
-    canvas.width = video.videoWidth; canvas.height = video.videoHeight;
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'dontInvert' });
-    if (code && code.data.startsWith('COLUMN:')) {
-      const colId = parseInt(code.data.split(':')[1]);
-      if (!isNaN(colId)) { stopCamera(); loadColumn(colId); return; }
+  function scanLoop() {
+    if (!scanning) return;
+    const video  = document.getElementById('scanner-video');
+    const canvas = document.getElementById('scanner-canvas');
+    if (video.readyState === video.HAVE_ENOUGH_DATA) {
+      canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'dontInvert' });
+      if (code && code.data.startsWith('COLUMN:')) {
+        const colId = parseInt(code.data.split(':')[1]);
+        if (!isNaN(colId)) { stopCamera(); loadColumn(colId); return; }
+      }
     }
-  }
-  animFrame = requestAnimationFrame(scanLoop);
-}
-
-// ─── Manual entry ─────────────────────────────────────────────────────────────
-function manualColumnEntry() {
-  const val = parseInt(document.getElementById('manual-col-id').value);
-  if (!val || val < 1) { showToast('Enter a valid Column ID', 'error'); return; }
-  stopCamera();
-  loadColumn(val);
-}
-
-// ─── Step 2: Load boxes ───────────────────────────────────────────────────────
-async function loadColumn(columnId) {
-  scannedColumnId = columnId;
-  const res = await fetch('/api/column/' + columnId + '/boxes');
-  if (!res.ok) { showToast('Column not found.', 'error'); return; }
-  const data = await res.json();
-
-  document.getElementById('step2-column-badge').textContent = data.column_name;
-  const list = document.getElementById('box-list');
-  list.innerHTML = '';
-
-  if (data.boxes.length === 0) {
-    list.innerHTML = '<div class="empty-state"><div class="empty-icon">⊞</div><div class="empty-title">No boxes in this column</div></div>';
-  } else {
-    data.boxes.forEach(box => {
-      const el = document.createElement('div');
-      el.className = 'box-item-card';
-      el.style.cssText = 'padding:14px 16px;background:var(--surface2);border-radius:var(--radius);border:1px solid var(--border);cursor:pointer;transition:.15s;min-height:60px;';
-      el.innerHTML = `
-        <div style="font-weight:600;color:var(--text);">${box.box_name}</div>
-        <div style="font-size:13px;color:var(--text-muted);">${box.description || ''} — ${box.item_count} item${box.item_count !== 1 ? 's' : ''}</div>`;
-      el.addEventListener('mouseenter', () => el.style.borderColor = 'var(--accent)');
-      el.addEventListener('mouseleave', () => el.style.borderColor = 'var(--border)');
-      el.addEventListener('click', () => loadBox(box.id, box.box_name));
-      list.appendChild(el);
-    });
+    animFrame = requestAnimationFrame(scanLoop);
   }
 
-  document.getElementById('step2').style.display = 'block';
-  document.getElementById('step3').style.display = 'none';
-  document.getElementById('step4').style.display = 'none';
-  document.getElementById('step2').scrollIntoView({ behavior: 'smooth' });
-}
-
-// ─── Step 3: Load items ───────────────────────────────────────────────────────
-async function loadBox(boxId, boxName) {
-  selectedBoxId = boxId;
-  const res = await fetch('/api/box/' + boxId + '/items');
-  if (!res.ok) { showToast('Box not found.', 'error'); return; }
-  const data = await res.json();
-
-  document.getElementById('step3-box-badge').textContent = data.column_name + ' › ' + data.box_name;
-  const list = document.getElementById('item-list');
-  list.innerHTML = '';
-
-  if (data.items.length === 0) {
-    list.innerHTML = '<div class="empty-state"><div class="empty-icon">⊠</div><div class="empty-title">No items in this box</div></div>';
-  } else {
-    data.items.forEach(item => {
-      const isOut = item.quantity === 0;
-      const isLow = item.quantity <= item.min_stock;
-      const statusColor = isOut ? 'var(--danger)' : isLow ? 'var(--warning)' : 'var(--success)';
-      const el = document.createElement('div');
-      el.className = 'box-item-card';
-      el.style.cssText = 'padding:14px 16px;background:var(--surface2);border-radius:var(--radius);border:1px solid var(--border);cursor:pointer;transition:.15s;display:flex;align-items:center;justify-content:space-between;min-height:60px;';
-      el.innerHTML = `
-        <div>
-          <div style="font-weight:600;color:var(--text);">${item.item_name}</div>
-          ${item.description ? `<div style="font-size:12px;color:var(--text-muted);">${item.description}</div>` : ''}
-        </div>
-        <div style="text-align:right;min-width:60px;">
-          <div style="font-family:var(--mono);font-size:20px;font-weight:700;color:${statusColor};">${item.quantity}</div>
-          <div style="font-size:11px;color:var(--text-dim);">in stock</div>
-        </div>`;
-      el.addEventListener('mouseenter', () => el.style.borderColor = 'var(--accent)');
-      el.addEventListener('mouseleave', () => el.style.borderColor = 'var(--border)');
-      el.addEventListener('click', () => loadItem(item.id));
-      list.appendChild(el);
-    });
+  // ─── Manual entry ─────────────────────────────────────────────────────────────
+  function manualColumnEntry() {
+    const val = parseInt(document.getElementById('manual-col-id').value);
+    if (!val || val < 1) { showToast('Enter a valid Column ID', 'error'); return; }
+    stopCamera();
+    loadColumn(val);
   }
 
-  document.getElementById('step3').style.display = 'block';
-  document.getElementById('step4').style.display = 'none';
-  document.getElementById('step3').scrollIntoView({ behavior: 'smooth' });
-}
-
-// ─── Step 4: Load item detail ─────────────────────────────────────────────────
-async function loadItem(itemId) {
-  selectedItemId = itemId;
-  const res = await fetch('/api/item/' + itemId);
-  if (!res.ok) { showToast('Item not found.', 'error'); return; }
-  currentItem = await res.json();
-
-  document.getElementById('txn-item-name').textContent = currentItem.item_name;
-  document.getElementById('txn-location').textContent  = currentItem.column_name + ' › ' + currentItem.box_name;
-  document.getElementById('txn-stock').textContent     = currentItem.quantity;
-  document.getElementById('txn-borrowed').textContent  = currentItem.quantity_borrowed;
-  document.getElementById('txn-min').textContent       = currentItem.min_stock;
-
-  const stockEl = document.getElementById('txn-stock');
-  stockEl.style.color = currentItem.quantity === 0 ? 'var(--danger)' :
-    currentItem.quantity <= currentItem.min_stock ? 'var(--warning)' : 'var(--success)';
-
-  cancelAction();
-  document.getElementById('step4').style.display = 'block';
-  document.getElementById('step4').scrollIntoView({ behavior: 'smooth' });
-}
-
-// ─── Action selection ─────────────────────────────────────────────────────────
-function selectAction(action) {
-  selectedAction = action;
-  isReturnable   = true;  // reset toggle each time
-
-  const labels = {
-    take:    '📤 Taking from stock — enter quantity:',
-    return:  '📥 Returning to stock — enter quantity:',
-    restock: '📦 Adding to stock — enter quantity:'
-  };
-  document.getElementById('action-label').textContent = labels[action];
-  document.getElementById('qty-input').value = 1;
-  document.getElementById('txn-error').style.display = 'none';
-
-  // Project dropdown: shown for take & return, hidden for restock
-  document.getElementById('project-section').style.display =
-    (action === 'restock') ? 'none' : 'block';
-
-  // Returnable toggle: only shown on "take"
-  const retSec = document.getElementById('returnable-section');
-  retSec.style.display = (action === 'take') ? 'flex' : 'none';
-
-  // Reset toggle button state
-  const toggleBtn = document.getElementById('returnable-toggle');
-  toggleBtn.textContent = '↩ Returnable';
-  toggleBtn.classList.remove('non-returnable');
-
-  document.getElementById('qty-panel').style.display = 'block';
-  document.getElementById('qty-input').focus();
-}
-
-function cancelAction() {
-  selectedAction = null;
-  document.getElementById('qty-panel').style.display = 'none';
-  document.getElementById('txn-error').style.display = 'none';
-}
-
-function adjustQty(delta) {
-  const input = document.getElementById('qty-input');
-  input.value = Math.max(1, (parseInt(input.value) || 1) + delta);
-}
-
-function resetToItem() {
-  document.getElementById('step4').style.display = 'none';
-  document.getElementById('step3').scrollIntoView({ behavior: 'smooth' });
-}
-
-// ─── Submit transaction ───────────────────────────────────────────────────────
-async function submitTransaction() {
-  const qty   = parseInt(document.getElementById('qty-input').value);
-  const errEl = document.getElementById('txn-error');
-  errEl.style.display = 'none';
-  if (!qty || qty < 1) {
-    errEl.textContent = 'Enter a valid quantity.';
-    errEl.style.display = 'block';
-    return;
-  }
-
-  const projectId = document.getElementById('project-select').value || null;
-
-  const btn = document.getElementById('confirm-btn');
-  setLoading(btn, true, 'Processing…');
-
-  let url, body;
-  if (selectedAction === 'restock') {
-    url  = '/api/restock';
-    body = JSON.stringify({ item_id: selectedItemId, quantity: qty, project_id: projectId });
-  } else {
-    url  = '/api/transaction';
-    body = JSON.stringify({
-      item_id:       selectedItemId,
-      quantity:      qty,
-      type:          selectedAction,
-      project_id:    projectId,
-      is_returnable: (selectedAction === 'take') ? (isReturnable ? 1 : 0) : 1
-    });
-  }
-
-  try {
-    const res  = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+  // ─── Step 2: Load boxes — LED fires HERE at column identification ─────────────
+  async function loadColumn(columnId) {
+    scannedColumnId = columnId;
+    const res = await fetch('/api/column/' + columnId + '/boxes');
+    if (!res.ok) { showToast('Column not found.', 'error'); return; }
     const data = await res.json();
-    if (data.success) {
-      showSuccess(data);
+
+    // ── TRIGGER LED as soon as column is identified ──────────────────────────
+    triggerLED(data.column_name);
+
+    document.getElementById('step2-column-badge').textContent = data.column_name;
+    const list = document.getElementById('box-list');
+    list.innerHTML = '';
+
+    if (data.boxes.length === 0) {
+      list.innerHTML = '<div class="empty-state"><div class="empty-icon">⊞</div><div class="empty-title">No boxes in this column</div></div>';
     } else {
-      errEl.textContent = data.error || 'Transaction failed.';
+      data.boxes.forEach(box => {
+        const el = document.createElement('div');
+        el.className = 'box-item-card';
+        el.style.cssText = 'padding:14px 16px;background:var(--surface2);border-radius:var(--radius);border:1px solid var(--border);cursor:pointer;transition:.15s;min-height:60px;';
+        el.innerHTML = `
+          <div style="font-weight:600;color:var(--text);">${box.box_name}</div>
+          <div style="font-size:13px;color:var(--text-muted);">${box.description || ''} — ${box.item_count} item${box.item_count !== 1 ? 's' : ''}</div>`;
+        el.addEventListener('mouseenter', () => el.style.borderColor = 'var(--accent)');
+        el.addEventListener('mouseleave', () => el.style.borderColor = 'var(--border)');
+        el.addEventListener('click', () => loadBox(box.id, box.box_name));
+        list.appendChild(el);
+      });
+    }
+
+    document.getElementById('step2').style.display = 'block';
+    document.getElementById('step3').style.display = 'none';
+    document.getElementById('step4').style.display = 'none';
+    document.getElementById('step2').scrollIntoView({ behavior: 'smooth' });
+  }
+
+  // ─── Step 3: Load items ───────────────────────────────────────────────────────
+  async function loadBox(boxId, boxName) {
+    selectedBoxId = boxId;
+    const res = await fetch('/api/box/' + boxId + '/items');
+    if (!res.ok) { showToast('Box not found.', 'error'); return; }
+    const data = await res.json();
+
+    document.getElementById('step3-box-badge').textContent = data.column_name + ' › ' + data.box_name;
+    const list = document.getElementById('item-list');
+    list.innerHTML = '';
+
+    if (data.items.length === 0) {
+      list.innerHTML = '<div class="empty-state"><div class="empty-icon">⊠</div><div class="empty-title">No items in this box</div></div>';
+    } else {
+      data.items.forEach(item => {
+        const isOut = item.quantity === 0;
+        const isLow = item.quantity <= item.min_stock;
+        const statusColor = isOut ? 'var(--danger)' : isLow ? 'var(--warning)' : 'var(--success)';
+        const el = document.createElement('div');
+        el.className = 'box-item-card';
+        el.style.cssText = 'padding:14px 16px;background:var(--surface2);border-radius:var(--radius);border:1px solid var(--border);cursor:pointer;transition:.15s;display:flex;align-items:center;justify-content:space-between;min-height:60px;';
+        el.innerHTML = `
+          <div>
+            <div style="font-weight:600;color:var(--text);">${item.item_name}</div>
+            ${item.description ? `<div style="font-size:12px;color:var(--text-muted);">${item.description}</div>` : ''}
+          </div>
+          <div style="text-align:right;min-width:60px;">
+            <div style="font-family:var(--mono);font-size:20px;font-weight:700;color:${statusColor};">${item.quantity}</div>
+            <div style="font-size:11px;color:var(--text-dim);">in stock</div>
+          </div>`;
+        el.addEventListener('mouseenter', () => el.style.borderColor = 'var(--accent)');
+        el.addEventListener('mouseleave', () => el.style.borderColor = 'var(--border)');
+        el.addEventListener('click', () => loadItem(item.id));
+        list.appendChild(el);
+      });
+    }
+
+    document.getElementById('step3').style.display = 'block';
+    document.getElementById('step4').style.display = 'none';
+    document.getElementById('step3').scrollIntoView({ behavior: 'smooth' });
+  }
+
+  // ─── Step 4: Load item detail — no LED trigger here ──────────────────────────
+  async function loadItem(itemId) {
+    selectedItemId = itemId;
+    const res = await fetch('/api/item/' + itemId);
+    if (!res.ok) { showToast('Item not found.', 'error'); return; }
+    currentItem = await res.json();
+
+    document.getElementById('txn-item-name').textContent = currentItem.item_name;
+    document.getElementById('txn-location').textContent  = currentItem.column_name + ' › ' + currentItem.box_name;
+    document.getElementById('txn-stock').textContent     = currentItem.quantity;
+    document.getElementById('txn-borrowed').textContent  = currentItem.quantity_borrowed;
+    document.getElementById('txn-min').textContent       = currentItem.min_stock;
+
+    const stockEl = document.getElementById('txn-stock');
+    stockEl.style.color = currentItem.quantity === 0 ? 'var(--danger)' :
+      currentItem.quantity <= currentItem.min_stock ? 'var(--warning)' : 'var(--success)';
+
+    cancelAction();
+    document.getElementById('step4').style.display = 'block';
+    document.getElementById('step4').scrollIntoView({ behavior: 'smooth' });
+  }
+
+  // ─── Action selection ─────────────────────────────────────────────────────────
+  function selectAction(action) {
+    selectedAction = action;
+    isReturnable   = true;
+
+    const labels = {
+      take:    '📤 Taking from stock — enter quantity:',
+      return:  '📥 Returning to stock — enter quantity:',
+      restock: '📦 Adding to stock — enter quantity:'
+    };
+    document.getElementById('action-label').textContent = labels[action];
+    document.getElementById('qty-input').value = 1;
+    document.getElementById('txn-error').style.display = 'none';
+
+    document.getElementById('project-section').style.display =
+      (action === 'restock') ? 'none' : 'block';
+
+    const retSec = document.getElementById('returnable-section');
+    retSec.style.display = (action === 'take') ? 'flex' : 'none';
+
+    const toggleBtn = document.getElementById('returnable-toggle');
+    toggleBtn.textContent = '↩ Returnable';
+    toggleBtn.classList.remove('non-returnable');
+
+    document.getElementById('qty-panel').style.display = 'block';
+    document.getElementById('qty-input').focus();
+  }
+
+  function cancelAction() {
+    selectedAction = null;
+    document.getElementById('qty-panel').style.display = 'none';
+    document.getElementById('txn-error').style.display = 'none';
+  }
+
+  function adjustQty(delta) {
+    const input = document.getElementById('qty-input');
+    input.value = Math.max(1, (parseInt(input.value) || 1) + delta);
+  }
+
+  function resetToItem() {
+    document.getElementById('step4').style.display = 'none';
+    document.getElementById('step3').scrollIntoView({ behavior: 'smooth' });
+  }
+
+  // ─── Submit transaction ───────────────────────────────────────────────────────
+  async function submitTransaction() {
+    const qty   = parseInt(document.getElementById('qty-input').value);
+    const errEl = document.getElementById('txn-error');
+    errEl.style.display = 'none';
+    if (!qty || qty < 1) {
+      errEl.textContent = 'Enter a valid quantity.';
       errEl.style.display = 'block';
+      return;
     }
-  } catch (err) {
-    errEl.textContent = 'Network error. Please try again.';
-    errEl.style.display = 'block';
-  } finally {
-    setLoading(btn, false);
-  }
-}
 
-// ─── Success overlay ──────────────────────────────────────────────────────────
-function showSuccess(data) {
-  const labels = { take: 'Taken', return: 'Returned', restock: 'Restocked' };
-  const qty    = parseInt(document.getElementById('qty-input').value);
-  const proj   = document.getElementById('project-select');
-  const projLabel = proj.value ? ` for "${proj.options[proj.selectedIndex].text}"` : '';
-  const retLabel  = (!isReturnable && selectedAction === 'take') ? ' (Non-Returnable)' : '';
+    const projectId = document.getElementById('project-select').value || null;
+    const btn = document.getElementById('confirm-btn');
+    setLoading(btn, true, 'Processing…');
 
-  document.getElementById('success-msg').textContent = (labels[selectedAction] || 'Done') + ' successfully!';
-  document.getElementById('success-sub').textContent =
-    qty + ' × ' + currentItem.item_name + projLabel + retLabel + ' — New stock: ' + data.new_quantity;
-
-  const overlay = document.getElementById('success-overlay');
-  overlay.style.display = 'flex';
-}
-
-function continueScanning() {
-  document.getElementById('success-overlay').style.display = 'none';
-  scannedColumnId = null; selectedBoxId = null; selectedItemId = null;
-  selectedAction  = null; currentItem   = null; isReturnable   = true;
-  document.getElementById('step2').style.display = 'none';
-  document.getElementById('step3').style.display = 'none';
-  document.getElementById('step4').style.display = 'none';
-  document.getElementById('manual-col-id').value = '';
-  window.scrollTo({ top: 0, behavior: 'smooth' });
-}
-
-// ─── Keyboard shortcuts ───────────────────────────────────────────────────────
-document.addEventListener('keydown', function(e) {
-  if (e.key === 'Enter' && document.activeElement.id === 'qty-input') {
-    e.preventDefault();
-    submitTransaction();
-  }
-  if (e.key === 'Escape') {
-    if (document.getElementById('success-overlay').style.display === 'flex') {
-      continueScanning();
+    let url, body;
+    if (selectedAction === 'restock') {
+      url  = '/api/restock';
+      body = JSON.stringify({ item_id: selectedItemId, quantity: qty, project_id: projectId });
     } else {
-      cancelAction();
+      url  = '/api/transaction';
+      body = JSON.stringify({
+        item_id:       selectedItemId,
+        quantity:      qty,
+        type:          selectedAction,
+        project_id:    projectId,
+        is_returnable: (selectedAction === 'take') ? (isReturnable ? 1 : 0) : 1
+      });
+    }
+
+    try {
+      const res  = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+      const data = await res.json();
+      if (data.success) {
+        showSuccess(data);
+      } else {
+        errEl.textContent = data.error || 'Transaction failed.';
+        errEl.style.display = 'block';
+      }
+    } catch (err) {
+      errEl.textContent = 'Network error. Please try again.';
+      errEl.style.display = 'block';
+    } finally {
+      setLoading(btn, false);
     }
   }
-});
+
+  // ─── Success overlay ──────────────────────────────────────────────────────────
+  function showSuccess(data) {
+    const labels = { take: 'Taken', return: 'Returned', restock: 'Restocked' };
+    const qty    = parseInt(document.getElementById('qty-input').value);
+    const proj   = document.getElementById('project-select');
+    const projLabel = proj.value ? ` for "${proj.options[proj.selectedIndex].text}"` : '';
+    const retLabel  = (!isReturnable && selectedAction === 'take') ? ' (Non-Returnable)' : '';
+
+    document.getElementById('success-msg').textContent = (labels[selectedAction] || 'Done') + ' successfully!';
+    document.getElementById('success-sub').textContent =
+      qty + ' × ' + currentItem.item_name + projLabel + retLabel + ' — New stock: ' + data.new_quantity;
+
+    document.getElementById('success-overlay').style.display = 'flex';
+  }
+
+  function continueScanning() {
+    document.getElementById('success-overlay').style.display = 'none';
+    scannedColumnId = null; selectedBoxId = null; selectedItemId = null;
+    selectedAction  = null; currentItem   = null; isReturnable   = true;
+    document.getElementById('step2').style.display = 'none';
+    document.getElementById('step3').style.display = 'none';
+    document.getElementById('step4').style.display = 'none';
+    document.getElementById('manual-col-id').value = '';
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  // ─── Keyboard shortcuts ───────────────────────────────────────────────────────
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && document.activeElement.id === 'qty-input') {
+      e.preventDefault();
+      submitTransaction();
+    }
+    if (e.key === 'Escape') {
+      if (document.getElementById('success-overlay').style.display === 'flex') {
+        continueScanning();
+      } else {
+        cancelAction();
+      }
+    }
+  });
 </script>
 {% endblock %}
