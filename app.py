@@ -51,7 +51,15 @@ def trigger_led(column_name):
             pass  # Pi offline — don't break the app
 
     threading.Thread(target=_send, daemon=True).start()
-    
+
+def login_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if 'user_id' not in session:
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated
+
 @app.route('/api/trigger-led', methods=['POST'])
 @login_required
 def api_trigger_led():
@@ -62,13 +70,6 @@ def api_trigger_led():
     return jsonify({'ok': True})
 # ─── AUTH DECORATORS ──────────────────────────────────────────────────────────
 
-def login_required(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        if 'user_id' not in session:
-            return redirect(url_for('login'))
-        return f(*args, **kwargs)
-    return decorated
 
 def role_required(*roles):
     def decorator(f):
