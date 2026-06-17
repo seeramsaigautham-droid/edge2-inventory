@@ -2304,13 +2304,6 @@ def api_push_unsubscribe():
     conn.close()
     return jsonify({'ok': True})
 def send_push_to_all(title, body, url='/', tag='edge2-alert'):
-    """Send push notification to all subscribers."""
-    if not VAPID_PRIVATE_KEY or not VAPID_PUBLIC_KEY:
-        return
-    conn = get_db()
-    subs = conn.execute("SELECT * FROM push_subscriptions").fetchall()
-    conn.close()
-def send_push_to_all(title, body, url='/', tag='edge2-alert'):
     if not VAPID_PRIVATE_KEY or not VAPID_PUBLIC_KEY:
         return
 
@@ -2349,44 +2342,6 @@ def send_push_to_all(title, body, url='/', tag='edge2-alert'):
                 dead.append(row['id'])
             else:
                 app.logger.error(f'WebPush failed: {e}')
-        except Exception as e:
-            app.logger.error(f'Push error: {e}')
-
-    if dead:
-        conn = get_db()
-        for did in dead:
-            conn.execute("DELETE FROM push_subscriptions WHERE id=?", (did,))
-        conn.commit()
-        conn.close()
-    payload = json.dumps({'title': title, 'body': body, 'url': url, 'tag': tag})
-    dead = []
-
-    vapid_key_pem = VAPID_PRIVATE_KEY
-    if not vapid_key_pem.startswith('-----'):
-        vapid_key_pem = (
-            "-----BEGIN EC PRIVATE KEY-----\n" +
-            vapid_key_pem +
-            "\n-----END EC PRIVATE KEY-----"
-        )
-
-    for row in subs:
-        try:
-            sub = json.loads(row['subscription_json'])
-            app.logger.info(f'Sending push payload: {payload}')
-            wp = webpush(
-                subscription_info=sub,
-                data=payload,
-                vapid_private_key=vapid_key_pem,
-                vapid_claims={'sub': f'mailto:{VAPID_CLAIMS_EMAIL}'}
-            )
-            app.logger.info(f'Push response: {wp.status_code if hasattr(wp, "status_code") else wp}')
-        except WebPushException as e:
-            resp = e.response
-            if resp is not None and resp.status_code in (404, 410):
-                dead.append(row['id'])
-            else:
-                status = resp.status_code if resp is not None else 'no response'
-                app.logger.error(f'WebPush failed: {status} — {e}')
         except Exception as e:
             app.logger.error(f'Push error: {e}')
 
