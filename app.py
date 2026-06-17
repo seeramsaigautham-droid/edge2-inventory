@@ -2315,9 +2315,9 @@ def send_push_to_all(title, body, url='/', tag='edge2-alert'):
     vapid_key_pem = VAPID_PRIVATE_KEY
     if not vapid_key_pem.startswith('-----'):
         vapid_key_pem = (
-            "-----BEGIN PRIVATE KEY-----\n" +
+            "-----BEGIN EC PRIVATE KEY-----\n" +
             vapid_key_pem +
-            "\n-----END PRIVATE KEY-----"
+            "\n-----END EC PRIVATE KEY-----"
         )
 
     for row in subs:
