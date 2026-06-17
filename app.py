@@ -9,14 +9,20 @@ import csv
 from datetime import datetime
 import requests as _requests
 import threading
-
+import json
+from pywebpush import webpush, WebPushException
 
 app = Flask(__name__)
 app.secret_key = 'edge2systems_inventory_secret_2024'
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
-app.config['PERMANENT_SESSION_LIFETIME'] = 28800  # 8 hours
+app.config['PERMANENT_SESSION_LIFETIME'] = 43200  # 12 hrs effectively
+app.config['SESSION_COOKIE_SECURE'] = True
+
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'instance', 'inventory.db')
+VAPID_PRIVATE_KEY  = os.environ.get('VAPID_PRIVATE_KEY', '')
+VAPID_PUBLIC_KEY   = os.environ.get('VAPID_PUBLIC_KEY', '')
+VAPID_CLAIMS_EMAIL = os.environ.get('VAPID_CLAIMS_EMAIL', 'admin@edge2.com')
 
 # ─── DB HELPERS ───────────────────────────────────────────────────────────────
 
@@ -58,8 +64,7 @@ def login_required(f):
         if 'user_id' not in session:
             return redirect(url_for('login'))
         return f(*args, **kwargs)
-    return decorated
-
+    return decorated  
 @app.route('/api/trigger-led', methods=['POST'])
 @login_required
 def api_trigger_led():
@@ -84,15 +89,16 @@ def role_required(*roles):
 # ─── CONTEXT PROCESSOR: LOW STOCK BADGE ──────────────────────────────────────
 
 @app.context_processor
-def inject_low_stock_count():
+def inject_globals():
+    ctx = {'low_stock_alert_count': 0, 'vapid_public_key': VAPID_PUBLIC_KEY}
     if 'user_id' in session and session.get('role') in ('admin', 'storekeeper'):
         conn = get_db()
         count = conn.execute(
             "SELECT COUNT(*) FROM inventory_items WHERE quantity <= min_stock"
         ).fetchone()[0]
         conn.close()
-        return {'low_stock_alert_count': count}
-    return {'low_stock_alert_count': 0}
+        ctx['low_stock_alert_count'] = count
+    return ctx
 
 # ─── INIT DB ──────────────────────────────────────────────────────────────────
 
@@ -157,6 +163,13 @@ def init_db():
             FOREIGN KEY(user_id) REFERENCES users(id),
             FOREIGN KEY(item_id) REFERENCES inventory_items(id),
             FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE SET NULL
+        );
+        CREATE TABLE IF NOT EXISTS push_subscriptions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            subscription_json TEXT NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, subscription_json)
         );
         CREATE TABLE IF NOT EXISTS temperature_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -311,6 +324,7 @@ def login():
 
         if user:
             _login_attempts.pop(ip, None)
+            session.permanent=True
             session['user_id']   = user['id']
             session['user_name'] = user['name']
             session['role']      = user['role']
@@ -2244,8 +2258,76 @@ def api_analytics_daily():
         return jsonify([dict(r) for r in rows])
     except sqlite3.Error:
         return jsonify({'error': 'Database error'}), 500
-    
+# ─── PUSH NOTIFICATIONS ───────────────────────────────────────────────────────
+
+
+@app.route('/api/push/vapid-public-key')
+def api_vapid_public_key():
+    return jsonify({'publicKey': VAPID_PUBLIC_KEY})
+
+@app.route('/api/push/subscribe', methods=['POST'])
+@login_required
+def api_push_subscribe():
+    sub = request.get_json()
+    if not sub:
+        return jsonify({'error': 'No subscription data'}), 400
+    conn = get_db()
+    try:
+        conn.execute(
+            "INSERT OR IGNORE INTO push_subscriptions (user_id, subscription_json) VALUES (?,?)",
+            (session['user_id'], json.dumps(sub))
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify({'ok': True})
+
+@app.route('/api/push/unsubscribe', methods=['POST'])
+@login_required
+def api_push_unsubscribe():
+    sub = request.get_json()
+    conn = get_db()
+    conn.execute(
+        "DELETE FROM push_subscriptions WHERE user_id=? AND subscription_json=?",
+        (session['user_id'], json.dumps(sub))
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({'ok': True})
+
+def send_push_to_all(title, body, url='/', tag='edge2-alert'):
+    """Send push notification to all subscribers."""
+    if not VAPID_PRIVATE_KEY or not VAPID_PUBLIC_KEY:
+        return
+    conn = get_db()
+    subs = conn.execute("SELECT * FROM push_subscriptions").fetchall()
+    conn.close()
+
+    payload = json.dumps({'title': title, 'body': body, 'url': url, 'tag': tag})
+    dead = []
+
+    for row in subs:
+        try:
+            webpush(
+                subscription_info=json.loads(row['subscription_json']),
+                data=payload,
+                vapid_private_key=VAPID_PRIVATE_KEY,
+                vapid_claims={'sub': f'mailto:{VAPID_CLAIMS_EMAIL}'}
+            )
+        except WebPushException as e:
+            if e.response and e.response.status_code in (404, 410):
+                dead.append(row['id'])
+        except Exception:
+            pass
+
+    if dead:
+        conn = get_db()
+        for did in dead:
+            conn.execute("DELETE FROM push_subscriptions WHERE id=?", (did,))
+        conn.commit()
+        conn.close()
 # ─── API: TEMPERATURE LOGGING ─────────────────────────────────────────────────
+
 
 @app.route('/api/temperature', methods=['POST'])
 def api_temperature_log():
@@ -2267,6 +2349,29 @@ def api_temperature_log():
     )
     conn.commit()
     conn.close()
+
+    # Threshold alerts — fire in background so Pi gets fast response
+    def _check_and_notify(temp):
+        if temp >= 75:
+            send_push_to_all(
+                '🔴 CRITICAL FIRE RISK',
+                f'Temperature is {temp}°C — immediate action required!',
+                url='/dashboard', tag='temp-critical'
+            )
+        elif temp >= 65:
+            send_push_to_all(
+                '🟠 Possible Fire Warning',
+                f'Temperature is {temp}°C — check the inventory room.',
+                url='/dashboard', tag='temp-fire'
+            )
+        elif temp >= 50:
+            send_push_to_all(
+                '🟡 High Temperature Warning',
+                f'Temperature is {temp}°C — monitor closely.',
+                url='/dashboard', tag='temp-warning'
+            )
+
+    threading.Thread(target=_check_and_notify, args=(temperature,), daemon=True).start()
 
     return jsonify({'ok': True})
 
