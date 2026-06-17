@@ -2301,7 +2301,6 @@ def api_push_unsubscribe():
     conn.commit()
     conn.close()
     return jsonify({'ok': True})
-
 def send_push_to_all(title, body, url='/', tag='edge2-alert'):
     """Send push notification to all subscribers."""
     if not VAPID_PRIVATE_KEY or not VAPID_PUBLIC_KEY:
@@ -2313,19 +2312,32 @@ def send_push_to_all(title, body, url='/', tag='edge2-alert'):
     payload = json.dumps({'title': title, 'body': body, 'url': url, 'tag': tag})
     dead = []
 
+    vapid_key_pem = VAPID_PRIVATE_KEY
+    if not vapid_key_pem.startswith('-----'):
+        vapid_key_pem = (
+            "-----BEGIN PRIVATE KEY-----\n" +
+            vapid_key_pem +
+            "\n-----END PRIVATE KEY-----"
+        )
+
     for row in subs:
         try:
-            webpush(
-                subscription_info=json.loads(row['subscription_json']),
+            sub = json.loads(row['subscription_json'])
+            wp = webpush(
+                subscription_info=sub,
                 data=payload,
-                vapid_private_key=VAPID_PRIVATE_KEY,
+                vapid_private_key=vapid_key_pem,
                 vapid_claims={'sub': f'mailto:{VAPID_CLAIMS_EMAIL}'}
             )
         except WebPushException as e:
-            if e.response and e.response.status_code in (404, 410):
+            resp = e.response
+            if resp is not None and resp.status_code in (404, 410):
                 dead.append(row['id'])
-        except Exception:
-            pass
+            else:
+                status = resp.status_code if resp is not None else 'no response'
+                app.logger.error(f'WebPush failed: {status} — {e}')
+        except Exception as e:
+            app.logger.error(f'Push error: {e}')
 
     if dead:
         conn = get_db()
