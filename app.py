@@ -10,7 +10,9 @@ from datetime import datetime
 import requests as _requests
 import threading
 import json
-from pywebpush import webpush, WebPushException
+from pywebpush import WebPusher, WebPushException
+from cryptography.hazmat.primitives.serialization import load_pem_private_key
+from cryptography.hazmat.backends import default_backend
 
 app = Flask(__name__)
 app.secret_key = 'edge2systems_inventory_secret_2024'
@@ -2308,7 +2310,54 @@ def send_push_to_all(title, body, url='/', tag='edge2-alert'):
     conn = get_db()
     subs = conn.execute("SELECT * FROM push_subscriptions").fetchall()
     conn.close()
+def send_push_to_all(title, body, url='/', tag='edge2-alert'):
+    if not VAPID_PRIVATE_KEY or not VAPID_PUBLIC_KEY:
+        return
 
+    ec_pem = (
+        "-----BEGIN EC PRIVATE KEY-----\n" +
+        VAPID_PRIVATE_KEY +
+        "\n-----END EC PRIVATE KEY-----"
+    ).encode()
+
+    try:
+        private_key = load_pem_private_key(ec_pem, password=None, backend=default_backend())
+    except Exception as e:
+        app.logger.error(f'Failed to load VAPID key: {e}')
+        return
+
+    conn = get_db()
+    subs = conn.execute("SELECT * FROM push_subscriptions").fetchall()
+    conn.close()
+
+    payload = json.dumps({'title': title, 'body': body, 'url': url, 'tag': tag})
+    dead = []
+
+    for row in subs:
+        try:
+            sub = json.loads(row['subscription_json'])
+            pusher = WebPusher(sub)
+            headers = pusher.as_curl(
+                data=payload,
+                vapid_private_key=private_key,
+                vapid_claims={'sub': f'mailto:{VAPID_CLAIMS_EMAIL}'}
+            )
+            app.logger.info(f'Push result: {headers}')
+        except WebPushException as e:
+            resp = e.response
+            if resp is not None and resp.status_code in (404, 410):
+                dead.append(row['id'])
+            else:
+                app.logger.error(f'WebPush failed: {e}')
+        except Exception as e:
+            app.logger.error(f'Push error: {e}')
+
+    if dead:
+        conn = get_db()
+        for did in dead:
+            conn.execute("DELETE FROM push_subscriptions WHERE id=?", (did,))
+        conn.commit()
+        conn.close()
     payload = json.dumps({'title': title, 'body': body, 'url': url, 'tag': tag})
     dead = []
 
