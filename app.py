@@ -2364,7 +2364,7 @@ def api_temperature_log():
                 f'Temperature is {temp}°C — check the inventory room.',
                 url='/dashboard', tag='temp-fire'
             )
-        elif temp >= 50:
+        elif temp >= 30:
             send_push_to_all(
                 '🟡 High Temperature Warning',
                 f'Temperature is {temp}°C — monitor closely.',
