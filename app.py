@@ -280,7 +280,14 @@ def generate_qr_for_column(column_id):
     img = qrcode.make(data)
     img.save(path)
     return f'qrcodes/column_{column_id}.png'
+# ─── SERVICE WORKER ───────────────────────────────────────────────────────────
 
+@app.route('/service-worker.js')
+def service_worker():
+    return app.send_static_file('service-worker.js'), 200, {
+        'Content-Type': 'application/javascript',
+        'Service-Worker-Allowed': '/'
+    }
 # ─── ROUTES: AUTH ─────────────────────────────────────────────────────────────
 
 @app.route('/')
