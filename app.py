@@ -2323,12 +2323,14 @@ def send_push_to_all(title, body, url='/', tag='edge2-alert'):
     for row in subs:
         try:
             sub = json.loads(row['subscription_json'])
+            app.logger.info(f'Sending push payload: {payload}')
             wp = webpush(
                 subscription_info=sub,
                 data=payload,
                 vapid_private_key=vapid_key_pem,
                 vapid_claims={'sub': f'mailto:{VAPID_CLAIMS_EMAIL}'}
             )
+            app.logger.info(f'Push response: {wp.status_code if hasattr(wp, "status_code") else wp}')
         except WebPushException as e:
             resp = e.response
             if resp is not None and resp.status_code in (404, 410):
