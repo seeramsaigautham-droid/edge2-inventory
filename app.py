@@ -2406,6 +2406,19 @@ def api_temperature_history():
     conn.close()
     return jsonify([dict(r) for r in rows])
 
+@app.route('/api/push/test', methods=['POST'])
+@login_required
+def api_push_test():
+    try:
+        send_push_to_all(
+            '🔴 Test Alert',
+            'This is a test notification from Edge2!',
+            url='/dashboard',
+            tag='test'
+        )
+        return jsonify({'ok': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 # ─── ERROR HANDLERS ───────────────────────────────────────────────────────────
 
 @app.errorhandler(404)
