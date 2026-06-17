@@ -51,15 +51,6 @@ def trigger_led(column_name):
             pass  # Pi offline — don't break the app
 
     threading.Thread(target=_send, daemon=True).start()
-
-def login_required(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        if 'user_id' not in session:
-            return redirect(url_for('login'))
-        return f(*args, **kwargs)
-    return decorated
-
     
 @app.route('/api/trigger-led', methods=['POST'])
 @login_required
@@ -71,6 +62,13 @@ def api_trigger_led():
     return jsonify({'ok': True})
 # ─── AUTH DECORATORS ──────────────────────────────────────────────────────────
 
+def login_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if 'user_id' not in session:
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated
 
 def role_required(*roles):
     def decorator(f):
@@ -158,6 +156,12 @@ def init_db():
             FOREIGN KEY(user_id) REFERENCES users(id),
             FOREIGN KEY(item_id) REFERENCES inventory_items(id),
             FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE SET NULL
+        );
+        CREATE TABLE IF NOT EXISTS temperature_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            temperature REAL NOT NULL,
+            humidity REAL,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
         );
 
         CREATE TABLE IF NOT EXISTS active_borrowings (
@@ -2239,6 +2243,55 @@ def api_analytics_daily():
         return jsonify([dict(r) for r in rows])
     except sqlite3.Error:
         return jsonify({'error': 'Database error'}), 500
+    
+# ─── API: TEMPERATURE LOGGING ─────────────────────────────────────────────────
+
+@app.route('/api/temperature', methods=['POST'])
+def api_temperature_log():
+    token = request.headers.get('Authorization', '')
+    if token != f"Bearer {os.environ.get('PI_API_TOKEN', '')}":
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    data        = request.get_json() or {}
+    temperature = data.get('temperature')
+    humidity    = data.get('humidity')
+
+    if temperature is None:
+        return jsonify({'error': 'temperature required'}), 400
+
+    conn = get_db()
+    conn.execute(
+        "INSERT INTO temperature_logs (temperature, humidity) VALUES (?, ?)",
+        (temperature, humidity)
+    )
+    conn.commit()
+    conn.close()
+
+    return jsonify({'ok': True})
+
+
+@app.route('/api/temperature/latest')
+@login_required
+def api_temperature_latest():
+    conn = get_db()
+    row = conn.execute(
+        "SELECT * FROM temperature_logs ORDER BY timestamp DESC LIMIT 1"
+    ).fetchone()
+    conn.close()
+    if not row:
+        return jsonify({'error': 'No data yet'}), 404
+    return jsonify(dict(row))
+
+
+@app.route('/api/temperature/history')
+@login_required
+def api_temperature_history():
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM temperature_logs ORDER BY timestamp DESC LIMIT 100"
+    ).fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
 
 # ─── ERROR HANDLERS ───────────────────────────────────────────────────────────
 
