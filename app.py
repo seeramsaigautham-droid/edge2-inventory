@@ -2447,6 +2447,15 @@ def not_found(e):
 def server_error(e):
     return render_template('500.html'), 500
 
+@app.route('/api/debug/vapid')
+@login_required
+def api_debug_vapid():
+    return jsonify({
+        'private_key_length': len(VAPID_PRIVATE_KEY),
+        'public_key_length': len(VAPID_PUBLIC_KEY),
+        'private_start': VAPID_PRIVATE_KEY[:20] if VAPID_PRIVATE_KEY else 'EMPTY',
+        'subs_count': get_db().execute("SELECT COUNT(*) FROM push_subscriptions").fetchone()[0]
+    })
 # ─── MAIN ─────────────────────────────────────────────────────────────────────
 init_db()
 if __name__ == '__main__':
