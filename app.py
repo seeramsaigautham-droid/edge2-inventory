@@ -2715,7 +2715,7 @@ def api_debug_push_direct():
     except Exception as e:
         return jsonify({'error': str(e)})
     finally:
-        os.unlink(tmp.name)-
+        os.unlink(tmp.name)
     
 @app.route('/api/debug/clear-subs', methods=['POST'])
 @login_required
