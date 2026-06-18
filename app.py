@@ -36,9 +36,11 @@ VAPID_CLAIMS_EMAIL = os.environ.get('VAPID_CLAIMS_EMAIL', 'admin@edge2.com')
 # ─── DB HELPERS ───────────────────────────────────────────────────────────────
 
 def get_db():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=10)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA busy_timeout = 10000")
     return conn
 
 def hash_password(pw):
@@ -2427,6 +2429,11 @@ def api_temperature_log():
         ).fetchone()
         if row:
             location_label = row['location_label']
+        else:
+            # Unknown/stale sensor_id (e.g. sensor was deleted) — don't let it
+            # violate the FK constraint, just log it without a sensor link.
+            app.logger.warning(f'Unknown sensor_id {sensor_id} in temperature POST, storing without link')
+            sensor_id = None
  
     conn.execute(
         "INSERT INTO temperature_logs (temperature, humidity, sensor_id) VALUES (?, ?, ?)",
