@@ -203,7 +203,26 @@ def init_db():
             c.execute(migration)
         except sqlite3.OperationalError:
             pass  # column already exists
+    # Migrate push_subscriptions to use endpoint as unique key
+    try:
+        conn.execute("ALTER TABLE push_subscriptions ADD COLUMN endpoint TEXT")
+    except sqlite3.OperationalError:
+        pass  # column already exists
 
+    # Backfill endpoint from existing subscription_json rows
+    rows = conn.execute("SELECT id, subscription_json FROM push_subscriptions").fetchall()
+    for r in rows:
+        try:
+            ep = json.loads(r['subscription_json']).get('endpoint', '')
+            conn.execute("UPDATE push_subscriptions SET endpoint=? WHERE id=?", (ep, r['id']))
+        except Exception:
+            pass
+    conn.commit()
+    try:
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_push_endpoint ON push_subscriptions(endpoint)")
+    except sqlite3.OperationalError:
+        pass
+    conn.commit()
     # Seed users
     users = [
         ('Admin User',     'admin@edge2.com', hash_password('admin123'),  'admin'),
@@ -2280,12 +2299,16 @@ def api_push_subscribe():
     sub = request.get_json()
     if not sub:
         return jsonify({'error': 'No subscription data'}), 400
+    endpoint = sub.get('endpoint', '')
     conn = get_db()
     try:
-        conn.execute(
-            "INSERT OR IGNORE INTO push_subscriptions (user_id, subscription_json) VALUES (?,?)",
-            (session['user_id'], json.dumps(sub))
-        )
+        conn.execute("""
+            INSERT INTO push_subscriptions (user_id, endpoint, subscription_json)
+            VALUES (?, ?, ?)
+            ON CONFLICT(endpoint) DO UPDATE SET
+                subscription_json = excluded.subscription_json,
+                user_id = excluded.user_id
+        """, (session['user_id'], endpoint, json.dumps(sub)))
         conn.commit()
     finally:
         conn.close()
@@ -2330,12 +2353,12 @@ def send_push_to_all(title, body, url='/', tag='edge2-alert'):
         try:
             sub = json.loads(row['subscription_json'])
             pusher = WebPusher(sub)
-            headers = pusher.as_curl(
+            response = pusher.send(
                 data=payload,
                 vapid_private_key=private_key,
                 vapid_claims={'sub': f'mailto:{VAPID_CLAIMS_EMAIL}'}
             )
-            app.logger.info(f'Push result: {headers}')
+            app.logger.info(f'Push sent, status: {response.status_code}')
         except WebPushException as e:
             resp = e.response
             if resp is not None and resp.status_code in (404, 410):
@@ -2350,7 +2373,6 @@ def send_push_to_all(title, body, url='/', tag='edge2-alert'):
         for did in dead:
             conn.execute("DELETE FROM push_subscriptions WHERE id=?", (did,))
         conn.commit()
-        conn.close()
 # ─── API: TEMPERATURE LOGGING ─────────────────────────────────────────────────
 
 
