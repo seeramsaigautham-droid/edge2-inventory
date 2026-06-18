@@ -2512,6 +2512,44 @@ def api_debug_vapid():
         'private_start': VAPID_PRIVATE_KEY[:20] if VAPID_PRIVATE_KEY else 'EMPTY',
         'subs_count': get_db().execute("SELECT COUNT(*) FROM push_subscriptions").fetchone()[0]
     })
+@app.route('/api/debug/push-direct', methods=['GET'])
+@login_required  
+def api_debug_push_direct():
+    conn = get_db()
+    row = conn.execute("SELECT subscription_json FROM push_subscriptions LIMIT 1").fetchone()
+    conn.close()
+    if not row:
+        return jsonify({'error': 'no subs'})
+    
+    sub = json.loads(row['subscription_json'])
+    
+    # Write key to temp file
+    key_body = "\n".join(textwrap.wrap(VAPID_PRIVATE_KEY, 64))
+    pem = f"-----BEGIN EC PRIVATE KEY-----\n{key_body}\n-----END EC PRIVATE KEY-----\n"
+    
+    tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.pem', delete=False)
+    tmp.write(pem)
+    tmp.close()
+    
+    try:
+        webpush(
+            subscription_info=sub,
+            data=json.dumps({'title': 'test', 'body': 'test', 'url': '/', 'tag': 'test'}),
+            vapid_private_key=tmp.name,  # pass file path instead of string
+            vapid_claims={'sub': f'mailto:{VAPID_CLAIMS_EMAIL}'}
+        )
+        return jsonify({'ok': True, 'pem_written': pem[:60]})
+    except WebPushException as e:
+        resp = e.response
+        return jsonify({
+            'error': str(e),
+            'status': resp.status_code if resp else None,
+            'body': resp.text if resp else None
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)})
+    finally:
+        os.unlink(tmp.name)
 # ─── MAIN ─────────────────────────────────────────────────────────────────────
 init_db()
 if __name__ == '__main__':
