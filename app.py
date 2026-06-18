@@ -2550,6 +2550,15 @@ def api_debug_push_direct():
         return jsonify({'error': str(e)})
     finally:
         os.unlink(tmp.name)
+    
+@app.route('/api/debug/clear-subs', methods=['POST'])
+@login_required
+def api_clear_subs():
+    conn = get_db()
+    conn.execute("DELETE FROM push_subscriptions")
+    conn.commit()
+    conn.close()
+    return jsonify({'ok': True})
 # ─── MAIN ─────────────────────────────────────────────────────────────────────
 init_db()
 if __name__ == '__main__':
