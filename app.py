@@ -12,7 +12,8 @@ import threading
 import json
 from pywebpush import webpush, WebPushException
 import textwrap
-
+from py_vapid import Vapid02 as Vapid
+import tempfile, base64
 app = Flask(__name__)
 app.secret_key = 'edge2systems_inventory_secret_2024'
 app.config['SESSION_COOKIE_HTTPONLY'] = True
@@ -24,8 +25,12 @@ DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'instance', '
 VAPID_PRIVATE_KEY  = os.environ.get('VAPID_PRIVATE_KEY', '')
 VAPID_PUBLIC_KEY   = os.environ.get('VAPID_PUBLIC_KEY', '')
 def _vapid_pem():
-    key_body = "\n".join(textwrap.wrap(VAPID_PRIVATE_KEY, 64))
-    return f"-----BEGIN EC PRIVATE KEY-----\n{key_body}\n-----END EC PRIVATE KEY-----"
+
+    try:
+        key_body = "\n".join(textwrap.wrap(VAPID_PRIVATE_KEY, 64))
+        return f"-----BEGIN EC PRIVATE KEY-----\n{key_body}\n-----END EC PRIVATE KEY-----"
+    except Exception:
+        return VAPID_PRIVATE_KEY
 VAPID_CLAIMS_EMAIL = os.environ.get('VAPID_CLAIMS_EMAIL', 'admin@edge2.com')
 
 # ─── DB HELPERS ───────────────────────────────────────────────────────────────
