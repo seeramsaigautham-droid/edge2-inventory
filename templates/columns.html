@@ -21,6 +21,7 @@
             <th>Boxes</th>
             <th>QR Status</th>
             <th>Created</th>
+            <th>Temp Sensor</th>
             <th>Actions</th>
           </tr>
         </thead>
@@ -34,6 +35,13 @@
                 <span class="badge badge-success">Generated</span>
               {% else %}
                 <span class="badge badge-muted">Not generated</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if col.sensor_name %}
+                <span class="badge badge-success" title="{{ col.sensor_location }}">{{ col.sensor_name }}</span>
+              {% else %}
+                <span style="color:var(--text-muted);font-size:12px;">—</span>
               {% endif %}
             </td>
             <td style="color:var(--text-muted);font-size:12px;">{{ col.created_at[:10] }}</td>

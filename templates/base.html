@@ -1090,6 +1090,9 @@
       >
         <i class="icon">⊟</i> Columns
       </a>
+      <a href="/temp-sensors" class="nav-link {% if request.path.startswith('/temp-sensors') %}active{% endif %}">
+        🌡️ Temp Sensors
+      </a>  
       <a
         href="{{ url_for('boxes') }}"
         class="nav-link {% if request.endpoint in ('boxes','add_box','edit_box','box_detail') %}active{% endif %}"

@@ -180,6 +180,23 @@ def init_db():
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(user_id, subscription_json)
         );
+
+        CREATE TABLE IF NOT EXISTS temp_sensors (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            location_label TEXT NOT NULL,
+            i2c_channel INTEGER NOT NULL DEFAULT 0,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS temp_sensor_columns (
+            sensor_id INTEGER NOT NULL,
+            column_id INTEGER NOT NULL,
+            PRIMARY KEY (sensor_id, column_id),
+            FOREIGN KEY(sensor_id) REFERENCES temp_sensors(id) ON DELETE CASCADE,
+            FOREIGN KEY(column_id) REFERENCES columns(id) ON DELETE CASCADE
+        );
+
         CREATE TABLE IF NOT EXISTS temperature_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             temperature REAL NOT NULL,
@@ -205,6 +222,7 @@ def init_db():
         "ALTER TABLE transactions ADD COLUMN project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL",
         "ALTER TABLE transactions ADD COLUMN is_returnable INTEGER NOT NULL DEFAULT 1",
         "ALTER TABLE active_borrowings ADD COLUMN is_returnable INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE temperature_logs ADD COLUMN sensor_id INTEGER REFERENCES temp_sensors(id) ON DELETE SET NULL",
     ]:
         try:
             c.execute(migration)
@@ -224,6 +242,7 @@ def init_db():
             conn.execute("UPDATE push_subscriptions SET endpoint=? WHERE id=?", (ep, r['id']))
         except Exception:
             pass
+
     conn.commit()
     try:
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_push_endpoint ON push_subscriptions(endpoint)")
@@ -776,13 +795,16 @@ def delete_project(project_id):
 @role_required('admin', 'storekeeper')
 def columns():
     conn = get_db()
-    cols = conn.execute("""
-        SELECT c.*, COUNT(b.id) as box_count
-        FROM columns c
-        LEFT JOIN boxes b ON b.column_id = c.id
-        GROUP BY c.id
-        ORDER BY c.column_name
-    """).fetchall()
+    cols = conn.execute('''
+            SELECT c.*, COUNT(b.id) as box_count,
+                ts.name as sensor_name, ts.location_label as sensor_location
+            FROM columns c
+            LEFT JOIN boxes b ON b.column_id = c.id
+            LEFT JOIN temp_sensor_columns tsc ON tsc.column_id = c.id
+            LEFT JOIN temp_sensors ts ON ts.id = tsc.sensor_id
+            GROUP BY c.id
+            ORDER BY c.column_name
+        ''').fetchall()
     conn.close()
     return render_template('columns.html', columns=cols)
 
@@ -2386,45 +2408,57 @@ def api_temperature_log():
     token = request.headers.get('Authorization', '')
     if token != f"Bearer {os.environ.get('PI_API_TOKEN', '')}":
         return jsonify({'error': 'Unauthorized'}), 401
-
+ 
     data        = request.get_json() or {}
     temperature = data.get('temperature')
     humidity    = data.get('humidity')
-
+    sensor_id   = data.get('sensor_id')      # NEW: which physical sensor
+ 
     if temperature is None:
         return jsonify({'error': 'temperature required'}), 400
-
+ 
     conn = get_db()
+ 
+    # Resolve location label from sensor_id (if provided)
+    location_label = None
+    if sensor_id:
+        row = conn.execute(
+            "SELECT location_label FROM temp_sensors WHERE id=?", (sensor_id,)
+        ).fetchone()
+        if row:
+            location_label = row['location_label']
+ 
     conn.execute(
-        "INSERT INTO temperature_logs (temperature, humidity) VALUES (?, ?)",
-        (temperature, humidity)
+        "INSERT INTO temperature_logs (temperature, humidity, sensor_id) VALUES (?, ?, ?)",
+        (temperature, humidity, sensor_id)
     )
     conn.commit()
     conn.close()
-
+ 
     # Threshold alerts — fire in background so Pi gets fast response
-    def _check_and_notify(temp):
+    def _check_and_notify(temp, loc):
+        loc_str = f' [{loc}]' if loc else ''
         if temp >= 75:
             send_push_to_all(
-                '🔴 CRITICAL FIRE RISK',
+                f'🔴 CRITICAL FIRE RISK{loc_str}',
                 f'Temperature is {temp}°C — immediate action required!',
-                url='/dashboard', tag='temp-critical'
+                url='/dashboard', tag=f'temp-critical-{sensor_id}'
             )
         elif temp >= 65:
             send_push_to_all(
-                '🟠 Possible Fire Warning',
+                f'🟠 Possible Fire Warning{loc_str}',
                 f'Temperature is {temp}°C — check the inventory room.',
-                url='/dashboard', tag='temp-fire'
+                url='/dashboard', tag=f'temp-fire-{sensor_id}'
             )
-        elif temp >= 30:
+        elif temp >= 50:
             send_push_to_all(
-                '🟡 High Temperature Warning',
+                f'🟡 High Temperature Warning{loc_str}',
                 f'Temperature is {temp}°C — monitor closely.',
-                url='/dashboard', tag='temp-warning'
+                url='/dashboard', tag=f'temp-warning-{sensor_id}'
             )
-
-    threading.Thread(target=_check_and_notify, args=(temperature,), daemon=True).start()
-
+ 
+    threading.Thread(target=_check_and_notify, args=(temperature, location_label), daemon=True).start()
+ 
     return jsonify({'ok': True})
 
 
@@ -2502,6 +2536,122 @@ def api_push_test():
         return jsonify({'ok': True})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+# ─── ROUTES: TEMPERATURE SENSORS ─────────────────────────────────────────────
+ 
+@app.route('/temp-sensors')
+@login_required
+@role_required('admin', 'storekeeper')
+def temp_sensors():
+    conn = get_db()
+    sensors_raw = conn.execute(
+        "SELECT * FROM temp_sensors ORDER BY i2c_channel"
+    ).fetchall()
+    all_columns = conn.execute(
+        "SELECT id, column_name FROM columns ORDER BY column_name"
+    ).fetchall()
+ 
+    sensors = []
+    for s in sensors_raw:
+        assigned = conn.execute(
+            \"\"\"SELECT c.id, c.column_name FROM temp_sensor_columns tsc
+               JOIN columns c ON c.id = tsc.column_id
+               WHERE tsc.sensor_id=?\"\"\",
+            (s['id'],)
+        ).fetchall()
+        d = dict(s)
+        d['assigned_columns'] = [r['column_name'] for r in assigned]
+        d['column_ids']       = [r['id'] for r in assigned]
+        sensors.append(d)
+ 
+    conn.close()
+    return render_template('temp_sensors.html', sensors=sensors, all_columns=all_columns)
+ 
+ 
+@app.route('/temp-sensors/save', methods=['POST'])
+@login_required
+@role_required('admin', 'storekeeper')
+def temp_sensor_save():
+    sensor_id     = request.form.get('sensor_id', '').strip()
+    name          = request.form.get('name', '').strip()
+    location_label = request.form.get('location_label', '').strip()
+    i2c_channel   = request.form.get('i2c_channel', '0').strip()
+    column_ids    = request.form.getlist('column_ids')  # list of str IDs
+ 
+    if not name or not location_label:
+        return redirect(url_for('temp_sensors'))
+ 
+    try:
+        i2c_channel = int(i2c_channel)
+        column_ids  = [int(c) for c in column_ids]
+    except ValueError:
+        return redirect(url_for('temp_sensors'))
+ 
+    conn = get_db()
+    try:
+        if sensor_id:
+            conn.execute(
+                "UPDATE temp_sensors SET name=?, location_label=?, i2c_channel=? WHERE id=?",
+                (name, location_label, i2c_channel, int(sensor_id))
+            )
+            conn.execute(
+                "DELETE FROM temp_sensor_columns WHERE sensor_id=?", (int(sensor_id),)
+            )
+            sid = int(sensor_id)
+        else:
+            cur = conn.execute(
+                "INSERT INTO temp_sensors (name, location_label, i2c_channel) VALUES (?,?,?)",
+                (name, location_label, i2c_channel)
+            )
+            sid = cur.lastrowid
+ 
+        for cid in column_ids:
+            conn.execute(
+                "INSERT OR IGNORE INTO temp_sensor_columns (sensor_id, column_id) VALUES (?,?)",
+                (sid, cid)
+            )
+        conn.commit()
+    except sqlite3.IntegrityError:
+        pass
+    finally:
+        conn.close()
+ 
+    return redirect(url_for('temp_sensors'))
+ 
+ 
+@app.route('/temp-sensors/delete/<int:sid>', methods=['POST'])
+@login_required
+@role_required('admin')
+def temp_sensor_delete(sid):
+    conn = get_db()
+    conn.execute("DELETE FROM temp_sensors WHERE id=?", (sid,))
+    conn.commit()
+    conn.close()
+    return redirect(url_for('temp_sensors'))
+ 
+ 
+# ─── API: TEMPERATURE BY SENSOR ───────────────────────────────────────────────
+ 
+@app.route('/api/temperature/by-sensor')
+@login_required
+def api_temperature_by_sensor():
+    \"\"\"Return latest reading per sensor.\"\"\"
+    conn = get_db()
+    rows = conn.execute(\"\"\"
+        SELECT tl.sensor_id, tl.temperature, tl.humidity, tl.timestamp,
+               ts.name as sensor_name, ts.location_label
+        FROM temperature_logs tl
+        LEFT JOIN temp_sensors ts ON ts.id = tl.sensor_id
+        WHERE tl.id IN (
+            SELECT MAX(id) FROM temperature_logs
+            WHERE sensor_id IS NOT NULL
+            GROUP BY sensor_id
+        )
+        ORDER BY tl.sensor_id
+    \"\"\").fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
+
 # ─── ERROR HANDLERS ───────────────────────────────────────────────────────────
 
 @app.errorhandler(404)

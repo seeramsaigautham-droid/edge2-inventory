@@ -1,0 +1,236 @@
+{% extends "base.html" %}
+{% block title %}Temperature Sensors{% endblock %}
+{% block content %}
+
+<div class="page-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;">
+  <div>
+    <div class="breadcrumb"><a href="/dashboard">Dashboard</a> / Temperature Sensors</div>
+    <h1 class="page-title">Temperature Sensors</h1>
+  </div>
+  {% if session.get('role') in ('admin', 'storekeeper') %}
+  <button class="btn btn-primary" onclick="openAddModal()">+ Add Sensor</button>
+  {% endif %}
+</div>
+
+{% if sensors %}
+<div class="card" style="margin-bottom:24px;">
+  <div class="card-body" style="padding:0;">
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Sensor Name</th>
+            <th>Location Label</th>
+            <th>I²C Channel</th>
+            <th>Assigned Columns</th>
+            <th>Last Reading</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for s in sensors %}
+          <tr>
+            <td style="font-weight:600;color:var(--text);">{{ s.name }}</td>
+            <td><span class="badge badge-muted">{{ s.location_label }}</span></td>
+            <td style="font-family:monospace;font-size:13px;">CH{{ s.i2c_channel }}</td>
+            <td>
+              {% if s.assigned_columns %}
+                {% for col in s.assigned_columns %}
+                  <span class="badge badge-success" style="margin-right:4px;">{{ col }}</span>
+                {% endfor %}
+              {% else %}
+                <span style="color:var(--text-muted);font-size:12px;">None assigned</span>
+              {% endif %}
+            </td>
+            <td id="last-reading-{{ s.id }}" style="color:var(--text-muted);font-size:12px;">
+              Loading…
+            </td>
+            <td>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                {% if session.get('role') in ('admin', 'storekeeper') %}
+                <button class="btn btn-sm btn-secondary"
+                  onclick="openEditModal({{ s.id }}, '{{ s.name }}', '{{ s.location_label }}', {{ s.i2c_channel }}, {{ s.column_ids | tojson }})">
+                  Edit
+                </button>
+                {% endif %}
+                {% if session.get('role') == 'admin' %}
+                <form method="POST" action="/temp-sensors/delete/{{ s.id }}" style="display:inline;"
+                  id="del-sensor-{{ s.id }}">
+                  <button type="button" class="btn btn-sm btn-danger"
+                    onclick="openConfirm('Delete sensor &quot;{{ s.name }}&quot;?', 'del-sensor-{{ s.id }}')">
+                    Delete
+                  </button>
+                </form>
+                {% endif %}
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Temperature History Cards -->
+<h2 style="font-size:16px;font-weight:700;margin-bottom:12px;color:var(--text);">Live Readings</h2>
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:16px;margin-bottom:32px;">
+  {% for s in sensors %}
+  <div class="card" id="card-{{ s.id }}">
+    <div class="card-body">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">
+        <div>
+          <div style="font-weight:700;color:var(--text);">{{ s.name }}</div>
+          <div style="font-size:12px;color:var(--text-muted);">{{ s.location_label }}</div>
+        </div>
+        <span class="badge badge-muted" id="status-badge-{{ s.id }}">–</span>
+      </div>
+      <div style="font-size:36px;font-weight:800;color:var(--primary);margin:8px 0;" id="temp-big-{{ s.id }}">–°C</div>
+      <div style="font-size:12px;color:var(--text-muted);" id="temp-time-{{ s.id }}">No data yet</div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+{% else %}
+<div class="empty-state">
+  <div class="empty-icon">🌡️</div>
+  <div class="empty-title">No sensors configured</div>
+  <div class="empty-sub">Add a temperature sensor to start monitoring locations.</div>
+  {% if session.get('role') in ('admin', 'storekeeper') %}
+  <button class="btn btn-primary" style="margin-top:16px;" onclick="openAddModal()">+ Add Sensor</button>
+  {% endif %}
+</div>
+{% endif %}
+
+<!-- Add/Edit Modal -->
+<div id="sensorModal" class="modal-overlay">
+  <div class="modal-box" style="max-width:480px;">
+    <div class="modal-title" id="sensorModalTitle">Add Temperature Sensor</div>
+    <form method="POST" action="/temp-sensors/save" id="sensorForm">
+      <input type="hidden" name="sensor_id" id="sensor_id" value="">
+
+      <div style="margin-bottom:14px;">
+        <label style="display:block;font-size:13px;font-weight:600;margin-bottom:6px;">Sensor Name</label>
+        <input type="text" name="name" id="modal_name" class="form-input" placeholder="e.g. Sensor 1" required>
+      </div>
+
+      <div style="margin-bottom:14px;">
+        <label style="display:block;font-size:13px;font-weight:600;margin-bottom:6px;">Location Label</label>
+        <input type="text" name="location_label" id="modal_location" class="form-input" placeholder="e.g. Aisle A, Server Room" required>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">This label appears in push notifications when threshold is breached.</div>
+      </div>
+
+      <div style="margin-bottom:14px;">
+        <label style="display:block;font-size:13px;font-weight:600;margin-bottom:6px;">I²C Multiplexer Channel (0–7)</label>
+        <select name="i2c_channel" id="modal_channel" class="form-input" required>
+          {% for ch in range(8) %}
+          <option value="{{ ch }}">Channel {{ ch }}</option>
+          {% endfor %}
+        </select>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Each MCP9808 sensor connects to a separate channel on the TCA9548A multiplexer.</div>
+      </div>
+
+      <div style="margin-bottom:18px;">
+        <label style="display:block;font-size:13px;font-weight:600;margin-bottom:8px;">Assign Columns</label>
+        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;">
+          {% for col in all_columns %}
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
+            <input type="checkbox" name="column_ids" value="{{ col.id }}" class="col-checkbox">
+            {{ col.column_name }}
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button type="submit" class="btn btn-primary" id="sensorSaveBtn">Save Sensor</button>
+        <button type="button" class="btn btn-secondary" onclick="closeSensorModal()">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+// ── Modal helpers ──────────────────────────────────────────────────────────────
+function openAddModal() {
+  document.getElementById('sensorModalTitle').textContent = 'Add Temperature Sensor';
+  document.getElementById('sensor_id').value = '';
+  document.getElementById('modal_name').value = '';
+  document.getElementById('modal_location').value = '';
+  document.getElementById('modal_channel').value = '0';
+  document.querySelectorAll('.col-checkbox').forEach(cb => cb.checked = false);
+  document.getElementById('sensorSaveBtn').textContent = 'Add Sensor';
+  document.getElementById('sensorModal').classList.add('open');
+}
+
+function openEditModal(id, name, location, channel, columnIds) {
+  document.getElementById('sensorModalTitle').textContent = 'Edit Sensor';
+  document.getElementById('sensor_id').value = id;
+  document.getElementById('modal_name').value = name;
+  document.getElementById('modal_location').value = location;
+  document.getElementById('modal_channel').value = channel;
+  document.querySelectorAll('.col-checkbox').forEach(cb => {
+    cb.checked = columnIds.includes(parseInt(cb.value));
+  });
+  document.getElementById('sensorSaveBtn').textContent = 'Save Changes';
+  document.getElementById('sensorModal').classList.add('open');
+}
+
+function closeSensorModal() {
+  document.getElementById('sensorModal').classList.remove('open');
+}
+
+document.getElementById('sensorModal').addEventListener('click', function(e) {
+  if (e.target === this) closeSensorModal();
+});
+
+// ── Live readings ──────────────────────────────────────────────────────────────
+async function refreshReadings() {
+  try {
+    const res = await fetch('/api/temperature/by-sensor');
+    if (!res.ok) return;
+    const data = await res.json();
+
+    data.forEach(row => {
+      const id = row.sensor_id;
+      const temp = row.temperature !== null ? row.temperature.toFixed(1) : null;
+
+      const bigEl   = document.getElementById('temp-big-' + id);
+      const timeEl  = document.getElementById('temp-time-' + id);
+      const badgeEl = document.getElementById('status-badge-' + id);
+      const rowEl   = document.getElementById('last-reading-' + id);
+
+      if (!bigEl) return;
+
+      if (temp === null) {
+        bigEl.textContent = '–°C';
+        timeEl.textContent = 'No data';
+        badgeEl.textContent = '–';
+        return;
+      }
+
+      bigEl.textContent = temp + '°C';
+      timeEl.textContent = row.timestamp ? new Date(row.timestamp + 'Z').toLocaleString() : '';
+      if (rowEl) rowEl.textContent = temp + '°C @ ' + (row.timestamp ? row.timestamp.slice(11,16) : '');
+
+      // Color coding
+      let color = 'var(--success)';
+      let badge = 'OK';
+      if (parseFloat(temp) >= 75)      { color = '#c0392b'; badge = '🔴 CRITICAL'; }
+      else if (parseFloat(temp) >= 65) { color = '#e67e22'; badge = '🟠 WARNING'; }
+      else if (parseFloat(temp) >= 50) { color = '#f1c40f'; badge = '🟡 HIGH'; }
+
+      bigEl.style.color = color;
+      badgeEl.textContent = badge;
+      badgeEl.style.background = color;
+      badgeEl.style.color = '#fff';
+    });
+  } catch(e) {}
+}
+
+refreshReadings();
+setInterval(refreshReadings, 30000);
+</script>
+
+{% endblock %}
