@@ -10,9 +10,7 @@ from datetime import datetime
 import requests as _requests
 import threading
 import json
-from pywebpush import WebPusher, WebPushException
-from cryptography.hazmat.primitives.serialization import load_pem_private_key
-from cryptography.hazmat.backends import default_backend
+from pywebpush import webpush, WebPushException
 
 app = Flask(__name__)
 app.secret_key = 'edge2systems_inventory_secret_2024'
@@ -2334,13 +2332,7 @@ def send_push_to_all(title, body, url='/', tag='edge2-alert'):
         "-----BEGIN EC PRIVATE KEY-----\n" +
         VAPID_PRIVATE_KEY +
         "\n-----END EC PRIVATE KEY-----"
-    ).encode()
-
-    try:
-        private_key = load_pem_private_key(ec_pem, password=None, backend=default_backend())
-    except Exception as e:
-        app.logger.error(f'Failed to load VAPID key: {e}')
-        return
+    )
 
     conn = get_db()
     subs = conn.execute("SELECT * FROM push_subscriptions").fetchall()
@@ -2352,13 +2344,13 @@ def send_push_to_all(title, body, url='/', tag='edge2-alert'):
     for row in subs:
         try:
             sub = json.loads(row['subscription_json'])
-            pusher = WebPusher(sub)
-            response = pusher.send(
+            webpush(
+                subscription_info=sub,
                 data=payload,
-                vapid_private_key=private_key,
+                vapid_private_key=ec_pem,
                 vapid_claims={'sub': f'mailto:{VAPID_CLAIMS_EMAIL}'}
             )
-            app.logger.info(f'Push sent, status: {response.status_code}')
+            app.logger.info(f'Push sent to sub id {row["id"]}')
         except WebPushException as e:
             resp = e.response
             if resp is not None and resp.status_code in (404, 410):
@@ -2373,6 +2365,7 @@ def send_push_to_all(title, body, url='/', tag='edge2-alert'):
         for did in dead:
             conn.execute("DELETE FROM push_subscriptions WHERE id=?", (did,))
         conn.commit()
+        conn.close()
 # ─── API: TEMPERATURE LOGGING ─────────────────────────────────────────────────
 
 
@@ -2446,12 +2439,7 @@ def api_push_test_sync():
         "-----BEGIN EC PRIVATE KEY-----\n" +
         VAPID_PRIVATE_KEY +
         "\n-----END EC PRIVATE KEY-----"
-    ).encode()
-
-    try:
-        private_key = load_pem_private_key(ec_pem, password=None, backend=default_backend())
-    except Exception as e:
-        return jsonify({'error': f'Key load failed: {str(e)}'}), 500
+    )
 
     conn = get_db()
     subs = conn.execute("SELECT * FROM push_subscriptions").fetchall()
@@ -2463,13 +2451,18 @@ def api_push_test_sync():
     for row in subs:
         try:
             sub = json.loads(row['subscription_json'])
-            pusher = WebPusher(sub)
-            response = pusher.send(
+            webpush(
+                subscription_info=sub,
                 data=payload,
-                vapid_private_key=private_key,
+                vapid_private_key=ec_pem,
                 vapid_claims={'sub': f'mailto:{VAPID_CLAIMS_EMAIL}'}
             )
-            results.append({'id': row['id'], 'status': response.status_code, 'body': response.text})
+            results.append({'id': row['id'], 'status': 201})
+        except WebPushException as e:
+            resp = e.response
+            status = resp.status_code if resp is not None else None
+            body = resp.text if resp is not None else str(e)
+            results.append({'id': row['id'], 'error': str(e), 'status': status, 'body': body})
         except Exception as e:
             results.append({'id': row['id'], 'error': str(e)})
 
