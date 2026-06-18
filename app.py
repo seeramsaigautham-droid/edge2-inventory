@@ -11,6 +11,7 @@ import requests as _requests
 import threading
 import json
 from pywebpush import webpush, WebPushException
+import textwrap
 
 app = Flask(__name__)
 app.secret_key = 'edge2systems_inventory_secret_2024'
@@ -22,6 +23,9 @@ app.config['SESSION_COOKIE_SECURE'] = True
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'instance', 'inventory.db')
 VAPID_PRIVATE_KEY  = os.environ.get('VAPID_PRIVATE_KEY', '')
 VAPID_PUBLIC_KEY   = os.environ.get('VAPID_PUBLIC_KEY', '')
+def _vapid_pem():
+    key_body = "\n".join(textwrap.wrap(VAPID_PRIVATE_KEY, 64))
+    return f"-----BEGIN EC PRIVATE KEY-----\n{key_body}\n-----END EC PRIVATE KEY-----"
 VAPID_CLAIMS_EMAIL = os.environ.get('VAPID_CLAIMS_EMAIL', 'admin@edge2.com')
 
 # ─── DB HELPERS ───────────────────────────────────────────────────────────────
@@ -2327,13 +2331,7 @@ def api_push_unsubscribe():
 def send_push_to_all(title, body, url='/', tag='edge2-alert'):
     if not VAPID_PRIVATE_KEY or not VAPID_PUBLIC_KEY:
         return
-
-    ec_pem = (
-        "-----BEGIN EC PRIVATE KEY-----\n" +
-        VAPID_PRIVATE_KEY +
-        "\n-----END EC PRIVATE KEY-----"
-    )
-
+    ec_pem = _vapid_pem()
     conn = get_db()
     subs = conn.execute("SELECT * FROM push_subscriptions").fetchall()
     conn.close()
