@@ -2554,9 +2554,9 @@ def temp_sensors():
     sensors = []
     for s in sensors_raw:
         assigned = conn.execute(
-            \"\"\"SELECT c.id, c.column_name FROM temp_sensor_columns tsc
+            """SELECT c.id, c.column_name FROM temp_sensor_columns tsc
                JOIN columns c ON c.id = tsc.column_id
-               WHERE tsc.sensor_id=?\"\"\",
+               WHERE tsc.sensor_id=?""",
             (s['id'],)
         ).fetchall()
         d = dict(s)
@@ -2635,9 +2635,9 @@ def temp_sensor_delete(sid):
 @app.route('/api/temperature/by-sensor')
 @login_required
 def api_temperature_by_sensor():
-    \"\"\"Return latest reading per sensor.\"\"\"
+    """Return latest reading per sensor."""
     conn = get_db()
-    rows = conn.execute(\"\"\"
+    rows = conn.execute("""
         SELECT tl.sensor_id, tl.temperature, tl.humidity, tl.timestamp,
                ts.name as sensor_name, ts.location_label
         FROM temperature_logs tl
@@ -2648,7 +2648,7 @@ def api_temperature_by_sensor():
             GROUP BY sensor_id
         )
         ORDER BY tl.sensor_id
-    \"\"\").fetchall()
+    """).fetchall()
     conn.close()
     return jsonify([dict(r) for r in rows])
 
