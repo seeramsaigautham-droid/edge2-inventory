@@ -2436,6 +2436,44 @@ def api_temperature_latest():
     return jsonify(dict(row))
 
 
+@app.route('/api/push/test-sync', methods=['POST'])
+@login_required
+def api_push_test_sync():
+    if not VAPID_PRIVATE_KEY or not VAPID_PUBLIC_KEY:
+        return jsonify({'error': 'VAPID keys missing'}), 500
+
+    ec_pem = (
+        "-----BEGIN EC PRIVATE KEY-----\n" +
+        VAPID_PRIVATE_KEY +
+        "\n-----END EC PRIVATE KEY-----"
+    ).encode()
+
+    try:
+        private_key = load_pem_private_key(ec_pem, password=None, backend=default_backend())
+    except Exception as e:
+        return jsonify({'error': f'Key load failed: {str(e)}'}), 500
+
+    conn = get_db()
+    subs = conn.execute("SELECT * FROM push_subscriptions").fetchall()
+    conn.close()
+
+    results = []
+    payload = json.dumps({'title': '🔴 Sync Test', 'body': 'sync test', 'url': '/dashboard', 'tag': 'test'})
+
+    for row in subs:
+        try:
+            sub = json.loads(row['subscription_json'])
+            pusher = WebPusher(sub)
+            response = pusher.send(
+                data=payload,
+                vapid_private_key=private_key,
+                vapid_claims={'sub': f'mailto:{VAPID_CLAIMS_EMAIL}'}
+            )
+            results.append({'id': row['id'], 'status': response.status_code, 'body': response.text})
+        except Exception as e:
+            results.append({'id': row['id'], 'error': str(e)})
+
+    return jsonify({'results': results})
 @app.route('/api/temperature/history')
 @login_required
 def api_temperature_history():
