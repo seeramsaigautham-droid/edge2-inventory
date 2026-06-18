@@ -2334,9 +2334,15 @@ def api_push_unsubscribe():
     conn.close()
     return jsonify({'ok': True})
 def send_push_to_all(title, body, url='/', tag='edge2-alert'):
+    import tempfile, os as _os
     if not VAPID_PRIVATE_KEY or not VAPID_PUBLIC_KEY:
         return
+
     ec_pem = _vapid_pem()
+    tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.pem', delete=False)
+    tmp.write(ec_pem + '\n')
+    tmp.close()
+
     conn = get_db()
     subs = conn.execute("SELECT * FROM push_subscriptions").fetchall()
     conn.close()
@@ -2344,24 +2350,27 @@ def send_push_to_all(title, body, url='/', tag='edge2-alert'):
     payload = json.dumps({'title': title, 'body': body, 'url': url, 'tag': tag})
     dead = []
 
-    for row in subs:
-        try:
-            sub = json.loads(row['subscription_json'])
-            webpush(
-                subscription_info=sub,
-                data=payload,
-                vapid_private_key=ec_pem,
-                vapid_claims={'sub': f'mailto:{VAPID_CLAIMS_EMAIL}'}
-            )
-            app.logger.info(f'Push sent to sub id {row["id"]}')
-        except WebPushException as e:
-            resp = e.response
-            if resp is not None and resp.status_code in (404, 410):
-                dead.append(row['id'])
-            else:
-                app.logger.error(f'WebPush failed: {e}')
-        except Exception as e:
-            app.logger.error(f'Push error: {e}')
+    try:
+        for row in subs:
+            try:
+                sub = json.loads(row['subscription_json'])
+                webpush(
+                    subscription_info=sub,
+                    data=payload,
+                    vapid_private_key=tmp.name,
+                    vapid_claims={'sub': f'mailto:{VAPID_CLAIMS_EMAIL}'}
+                )
+                app.logger.info(f'Push sent to sub id {row["id"]}')
+            except WebPushException as e:
+                resp = e.response
+                if resp is not None and resp.status_code in (404, 410):
+                    dead.append(row['id'])
+                else:
+                    app.logger.error(f'WebPush failed: {e}')
+            except Exception as e:
+                app.logger.error(f'Push error: {e}')
+    finally:
+        _os.unlink(tmp.name)
 
     if dead:
         conn = get_db()
