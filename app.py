@@ -98,7 +98,20 @@ def login_required(f):
         if 'user_id' not in session:
             return redirect(url_for('login'))
         return f(*args, **kwargs)
-    return decorated  
+    return decorated
+
+# ─── AUTH DECORATORS ──────────────────────────────────────────────────────────
+
+def role_required(*roles):
+    def decorator(f):
+        @wraps(f)
+        def decorated(*args, **kwargs):
+            if session.get('role') not in roles:
+                return redirect(url_for('dashboard'))
+            return f(*args, **kwargs)
+        return decorated
+    return decorator
+
 @app.route('/api/trigger-led', methods=['POST'])
 @login_required
 def api_trigger_led():
@@ -119,18 +132,6 @@ def api_column_preview_gpio():
     if pin is None:
         return jsonify({'pin': None, 'error': 'No GPIO pins available (all 6 slots used).'})
     return jsonify({'pin': pin})
-# ─── AUTH DECORATORS ──────────────────────────────────────────────────────────
-
-
-def role_required(*roles):
-    def decorator(f):
-        @wraps(f)
-        def decorated(*args, **kwargs):
-            if session.get('role') not in roles:
-                return redirect(url_for('dashboard'))
-            return f(*args, **kwargs)
-        return decorated
-    return decorator
 
 # ─── CONTEXT PROCESSOR: LOW STOCK BADGE ──────────────────────────────────────
 
