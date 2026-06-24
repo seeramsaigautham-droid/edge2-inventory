@@ -61,7 +61,9 @@ def hash_password(pw):
     return hashlib.sha256(pw.encode()).hexdigest()
 # ─── PI LED HELPER ────────────────────────────────────────────────────────────
 def trigger_led(column_name):
-    """Fire-and-forget POST to Raspberry Pi LED API using gpio_pin from DB."""
+    """Fire-and-forget POST to Raspberry Pi LED API using gpio_pin from DB.
+    Sends both gpio_pin (new pi_server.py) and column letter (legacy pi_api.py)
+    so it works regardless of which Pi script is running."""
     pi_url   = os.environ.get('PI_API_URL', '').rstrip('/')
     pi_token = os.environ.get('PI_API_TOKEN', '')
     if not pi_url:
@@ -78,12 +80,14 @@ def trigger_led(column_name):
         return  # no GPIO assigned to this column — skip silently
 
     gpio_pin = row['gpio_pin']
+    # Also derive the legacy letter for pi_api.py compatibility
+    letter = column_name.strip().split()[-1].upper()
 
     def _send():
         try:
             _requests.post(
                 f'{pi_url}/led',
-                json={'gpio_pin': gpio_pin},
+                json={'gpio_pin': gpio_pin, 'column': letter},
                 headers={'Authorization': f'Bearer {pi_token}'},
                 timeout=4
             )
@@ -274,14 +278,6 @@ def init_db():
     except sqlite3.OperationalError:
         pass  # column already exists
 
-    # Backfill gpio_pin for the three seed columns if not yet set
-    _seed_gpio = [('Column A', 17), ('Column B', 27), ('Column C', 22)]
-    for _col_name, _pin in _seed_gpio:
-        c.execute(
-            "UPDATE columns SET gpio_pin=? WHERE column_name=? AND gpio_pin IS NULL",
-            (_pin, _col_name)
-        )
-
     # Backfill endpoint from existing subscription_json rows
     rows = conn.execute("SELECT id, subscription_json FROM push_subscriptions").fetchall()
     for r in rows:
@@ -307,8 +303,15 @@ def init_db():
     for u in users:
         c.execute("INSERT OR IGNORE INTO users (name,email,password_hash,role) VALUES (?,?,?,?)", u)
 
-    for col in [('Column A',), ('Column B',), ('Column C',)]:
-        c.execute("INSERT OR IGNORE INTO columns (column_name) VALUES (?)", col)
+    for col in [('Column A', 17), ('Column B', 27), ('Column C', 22)]:
+        c.execute(
+            "INSERT OR IGNORE INTO columns (column_name, gpio_pin) VALUES (?, ?)", col
+        )
+        # If row already existed (IGNORE), backfill gpio_pin if it's still NULL
+        c.execute(
+            "UPDATE columns SET gpio_pin=? WHERE column_name=? AND gpio_pin IS NULL",
+            (col[1], col[0])
+        )
 
     conn.commit()
 
@@ -361,6 +364,20 @@ def init_db():
                     "INSERT INTO inventory_items (box_id,item_name,quantity,min_stock,description) VALUES (?,?,?,?,?)",
                     item
                 )
+
+    # Seed temp_sensors (sensor_id 1/2/3 must exist so Pi uploads link correctly)
+    _sensors = [
+        (1, 'Sensor 1', 'Location 1', 0),
+        (2, 'Sensor 2', 'Location 2', 1),
+        (3, 'Sensor 3', 'Location 3', 2),
+    ]
+    for sid, name, loc, ch in _sensors:
+        existing = c.execute("SELECT id FROM temp_sensors WHERE id=?", (sid,)).fetchone()
+        if not existing:
+            c.execute(
+                "INSERT INTO temp_sensors (id, name, location_label, i2c_channel) VALUES (?,?,?,?)",
+                (sid, name, loc, ch)
+            )
 
     conn.commit()
     conn.close()
