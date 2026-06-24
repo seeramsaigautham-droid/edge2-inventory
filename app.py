@@ -22,6 +22,20 @@ app.config['PERMANENT_SESSION_LIFETIME'] = 43200  # 12 hrs effectively
 app.config['SESSION_COOKIE_SECURE'] = True
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'instance', 'inventory.db')
+
+# ── GPIO pin pool (order = assignment priority) ───────────────────────────────
+ALLOWED_GPIO_PINS = [17, 27, 22, 23, 24, 25]
+
+def get_next_gpio_pin(conn):
+    """Return the first GPIO pin from ALLOWED_GPIO_PINS not yet assigned to any column.
+    Returns None if all pins are taken."""
+    used = {row[0] for row in conn.execute(
+        "SELECT gpio_pin FROM columns WHERE gpio_pin IS NOT NULL"
+    ).fetchall()}
+    for pin in ALLOWED_GPIO_PINS:
+        if pin not in used:
+            return pin
+    return None
 VAPID_PRIVATE_KEY  = os.environ.get('VAPID_PRIVATE_KEY', '')
 VAPID_PUBLIC_KEY   = os.environ.get('VAPID_PUBLIC_KEY', '')
 def _vapid_pem():
@@ -47,20 +61,29 @@ def hash_password(pw):
     return hashlib.sha256(pw.encode()).hexdigest()
 # ─── PI LED HELPER ────────────────────────────────────────────────────────────
 def trigger_led(column_name):
-    """Fire-and-forget POST to Raspberry Pi LED API."""
+    """Fire-and-forget POST to Raspberry Pi LED API using gpio_pin from DB."""
     pi_url   = os.environ.get('PI_API_URL', '').rstrip('/')
     pi_token = os.environ.get('PI_API_TOKEN', '')
     if not pi_url:
         return  # silently skip if not configured
 
-    # Extract the letter: "Column A" → "A"
-    letter = column_name.strip().split()[-1].upper()
+    # Look up the gpio_pin assigned to this column
+    conn = get_db()
+    row = conn.execute(
+        "SELECT gpio_pin FROM columns WHERE column_name=?", (column_name,)
+    ).fetchone()
+    conn.close()
+
+    if not row or row['gpio_pin'] is None:
+        return  # no GPIO assigned to this column — skip silently
+
+    gpio_pin = row['gpio_pin']
 
     def _send():
         try:
             _requests.post(
                 f'{pi_url}/led',
-                json={'column': letter},
+                json={'gpio_pin': gpio_pin},
                 headers={'Authorization': f'Bearer {pi_token}'},
                 timeout=4
             )
@@ -84,6 +107,18 @@ def api_trigger_led():
     if column_name:
         trigger_led(column_name)
     return jsonify({'ok': True})
+
+@app.route('/api/column/preview-gpio')
+@login_required
+@role_required('admin', 'storekeeper')
+def api_column_preview_gpio():
+    """Return the GPIO pin that would be auto-assigned to the next new column."""
+    conn = get_db()
+    pin = get_next_gpio_pin(conn)
+    conn.close()
+    if pin is None:
+        return jsonify({'pin': None, 'error': 'No GPIO pins available (all 6 slots used).'})
+    return jsonify({'pin': pin})
 # ─── AUTH DECORATORS ──────────────────────────────────────────────────────────
 
 
@@ -131,6 +166,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS columns (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             column_name TEXT NOT NULL UNIQUE,
+            gpio_pin INTEGER,
             qr_code_path TEXT,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
@@ -225,6 +261,7 @@ def init_db():
         "ALTER TABLE transactions ADD COLUMN is_returnable INTEGER NOT NULL DEFAULT 1",
         "ALTER TABLE active_borrowings ADD COLUMN is_returnable INTEGER NOT NULL DEFAULT 1",
         "ALTER TABLE temperature_logs ADD COLUMN sensor_id INTEGER REFERENCES temp_sensors(id) ON DELETE SET NULL",
+        "ALTER TABLE columns ADD COLUMN gpio_pin INTEGER",
     ]:
         try:
             c.execute(migration)
@@ -235,6 +272,14 @@ def init_db():
         conn.execute("ALTER TABLE push_subscriptions ADD COLUMN endpoint TEXT")
     except sqlite3.OperationalError:
         pass  # column already exists
+
+    # Backfill gpio_pin for the three seed columns if not yet set
+    _seed_gpio = [('Column A', 17), ('Column B', 27), ('Column C', 22)]
+    for _col_name, _pin in _seed_gpio:
+        c.execute(
+            "UPDATE columns SET gpio_pin=? WHERE column_name=? AND gpio_pin IS NULL",
+            (_pin, _col_name)
+        )
 
     # Backfill endpoint from existing subscription_json rows
     rows = conn.execute("SELECT id, subscription_json FROM push_subscriptions").fetchall()
@@ -808,28 +853,48 @@ def columns():
             ORDER BY c.column_name
         ''').fetchall()
     conn.close()
-    return render_template('columns.html', columns=cols)
+    gpio_assigned = request.args.get('gpio_assigned')
+    col_name      = request.args.get('col_name', '')
+    return render_template('columns.html', columns=cols,
+                           gpio_assigned=gpio_assigned, col_name=col_name)
 
 @app.route('/columns/add', methods=['GET', 'POST'])
 @login_required
 @role_required('admin', 'storekeeper')
 def add_column():
     error = None
+    assigned_pin = None  # shown in GET preview before save
+
+    if request.method == 'GET':
+        # Preview: what GPIO would be assigned next?
+        conn = get_db()
+        assigned_pin = get_next_gpio_pin(conn)
+        conn.close()
+
     if request.method == 'POST':
         column_name = request.form.get('column_name', '').strip()
         if not column_name:
             error = 'Column name is required.'
         else:
             conn = get_db()
-            try:
-                conn.execute("INSERT INTO columns (column_name) VALUES (?)", (column_name,))
-                conn.commit()
+            gpio_pin = get_next_gpio_pin(conn)
+            if gpio_pin is None:
+                error = 'No GPIO pins available. Maximum of 6 columns supported with physical LEDs. Remove an existing column to free a pin.'
                 conn.close()
-                return redirect(url_for('columns'))
-            except sqlite3.IntegrityError:
-                error = 'A column with that name already exists.'
-                conn.close()
-    return render_template('add_column.html', error=error)
+            else:
+                try:
+                    conn.execute(
+                        "INSERT INTO columns (column_name, gpio_pin) VALUES (?, ?)",
+                        (column_name, gpio_pin)
+                    )
+                    conn.commit()
+                    conn.close()
+                    return redirect(url_for('columns', _anchor='', gpio_assigned=gpio_pin, col_name=column_name))
+                except sqlite3.IntegrityError:
+                    error = 'A column with that name already exists.'
+                    conn.close()
+
+    return render_template('add_column.html', error=error, assigned_pin=assigned_pin)
 
 @app.route('/columns/edit/<int:column_id>', methods=['GET', 'POST'])
 @login_required

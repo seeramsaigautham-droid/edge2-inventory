@@ -1,6 +1,13 @@
 {% extends "base.html" %} {% block title %}Columns{% endblock %} {% block
 content %}
 
+{% if gpio_assigned %}
+<div class="alert alert-success" style="margin-bottom:16px;">
+  Column <strong>{{ col_name }}</strong> created successfully.
+  Connect LED to <strong>GPIO{{ gpio_assigned }}</strong>.
+</div>
+{% endif %}
+
 <div
   class="page-header"
   style="
