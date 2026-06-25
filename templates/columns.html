@@ -32,6 +32,7 @@ content %}
         <thead>
           <tr>
             <th>Column Name</th>
+            <th>GPIO Pin</th>
             <th>Boxes</th>
             <th>QR Status</th>
             <th>Created</th>
@@ -44,6 +45,13 @@ content %}
           <tr>
             <td style="font-weight: 600; color: var(--text)">
               {{ col.column_name }}
+            </td>
+            <td>
+              {% if col.gpio_pin %}
+              <span class="badge badge-success" style="font-family:monospace;">GPIO{{ col.gpio_pin }}</span>
+              {% else %}
+              <span style="color:var(--text-muted); font-size:12px;">—</span>
+              {% endif %}
             </td>
             <td>
               <span class="badge badge-muted"
@@ -74,6 +82,21 @@ content %}
             </td>
             <td>
               <div style="display: flex; gap: 6px; flex-wrap: wrap">
+                <!-- Info button -->
+                <button
+                  class="btn btn-sm btn-secondary"
+                  onclick="openInfoModal({
+                    name:     '{{ col.column_name }}',
+                    gpio:     '{{ col.gpio_pin or "Not assigned" }}',
+                    boxes:    '{{ col.box_count }}',
+                    qr:       '{{ "Generated" if col.qr_code_path else "Not generated" }}',
+                    sensor:   '{{ col.sensor_name or "None" }}',
+                    location: '{{ col.sensor_location or "—" }}',
+                    created:  '{{ col.created_at[:10] }}'
+                  })"
+                  title="Column info"
+                >ℹ Info</button>
+
                 <a
                   href="/boxes?column_id={{ col.id }}"
                   class="btn btn-sm btn-secondary"
@@ -142,6 +165,32 @@ content %}
 </div>
 {% endif %}
 
+<!-- ── Column Info Modal ─────────────────────────────────────────────────── -->
+<div id="infoModal" class="modal-overlay">
+  <div class="modal-box" style="max-width:420px;">
+    <div class="modal-title" id="infoModalTitle" style="margin-bottom:18px;"></div>
+
+    <table style="width:100%; border-collapse:collapse; font-size:0.92rem;">
+      <tbody id="infoModalBody"></tbody>
+    </table>
+
+    <!-- Wiring guide -->
+    <div id="infoWiringGuide" style="
+        margin-top:18px;
+        padding:12px 14px;
+        border-radius:6px;
+        background:var(--bg-secondary, #f5f5f5);
+        border:1px solid var(--border, #ddd);
+        font-size:0.85rem;
+        line-height:1.6;
+    "></div>
+
+    <div class="modal-actions" style="margin-top:20px; justify-content:flex-end;">
+      <button onclick="closeInfoModal()" class="btn btn-secondary btn-sm">Close</button>
+    </div>
+  </div>
+</div>
+
 <!-- QR View Modal -->
 <div id="qrModal" class="modal-overlay">
   <div class="modal-box" style="text-align: center">
@@ -169,7 +218,85 @@ content %}
   </div>
 </div>
 
+<style>
+  #infoModalBody tr td {
+    padding: 7px 10px;
+    border-bottom: 1px solid var(--border, #eee);
+    vertical-align: top;
+  }
+  #infoModalBody tr:last-child td { border-bottom: none; }
+  #infoModalBody td:first-child {
+    color: var(--text-muted);
+    width: 38%;
+    font-size: 0.82rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  #infoModalBody td:last-child {
+    font-weight: 600;
+    color: var(--text);
+  }
+  .gpio-highlight {
+    display: inline-block;
+    background: var(--primary, #2563eb);
+    color: #fff;
+    border-radius: 4px;
+    padding: 2px 10px;
+    font-family: monospace;
+    font-size: 1rem;
+    letter-spacing: 0.05em;
+  }
+</style>
+
 <script>
+  /* ── Column Info Modal ── */
+  function openInfoModal(col) {
+    document.getElementById("infoModalTitle").textContent =
+      col.name + " — Column Info";
+
+    const gpioDisplay = col.gpio === "Not assigned"
+      ? '<span style="color:var(--text-muted)">Not assigned</span>'
+      : `<span class="gpio-highlight">GPIO${col.gpio}</span>`;
+
+    const rows = [
+      ["Column Name",   col.name],
+      ["LED GPIO Pin",  gpioDisplay],
+      ["Boxes",         col.boxes],
+      ["QR Code",       col.qr],
+      ["Temp Sensor",   col.sensor],
+      ["Sensor Location", col.location],
+      ["Created",       col.created],
+    ];
+
+    document.getElementById("infoModalBody").innerHTML = rows
+      .map(([label, val]) => `
+        <tr>
+          <td>${label}</td>
+          <td>${val}</td>
+        </tr>`)
+      .join("");
+
+    // Wiring guide
+    const wiring = col.gpio === "Not assigned"
+      ? `<strong>⚠ No GPIO assigned.</strong> This column has no LED wired.`
+      : `<strong>🔌 Wiring guide for technician</strong><br>
+         Connect LED <strong>anode (+)</strong> → <strong>GPIO${col.gpio}</strong> via 220Ω resistor<br>
+         Connect LED <strong>cathode (−)</strong> → any <strong>GND pin</strong><br>
+         <span style="color:var(--text-muted)">Pi 5 BCM pin ${col.gpio} · auto-off after 33 s</span>`;
+
+    document.getElementById("infoWiringGuide").innerHTML = wiring;
+
+    document.getElementById("infoModal").classList.add("open");
+  }
+
+  function closeInfoModal() {
+    document.getElementById("infoModal").classList.remove("open");
+  }
+
+  document.getElementById("infoModal").addEventListener("click", function (e) {
+    if (e.target === this) closeInfoModal();
+  });
+
   /* ── QR Modal ── */
   function openQrModal(colId, colName) {
     document.getElementById("qrModalTitle").textContent =
