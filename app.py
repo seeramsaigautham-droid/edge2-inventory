@@ -24,7 +24,7 @@ app.config['SESSION_COOKIE_SECURE'] = True
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'instance', 'inventory.db')
 
 # ── GPIO pin pool (order = assignment priority) ───────────────────────────────
-ALLOWED_GPIO_PINS = [17, 27, 22, 23, 24, 25, 100, 101, 102, 103]
+ALLOWED_GPIO_PINS = [17, 27, 22, 23, 24, 25] + list(range(100, 116))
 
 def get_next_gpio_pin(conn):
     """Return the first GPIO pin from ALLOWED_GPIO_PINS not yet assigned to any column.
@@ -134,7 +134,7 @@ def api_column_preview_gpio():
     pin = get_next_gpio_pin(conn)
     conn.close()
     if pin is None:
-        return jsonify({'pin': None, 'error': 'No GPIO pins available (all 10 slots used).'})
+        return jsonify({'pin': None, 'error': 'No GPIO pins available (all 22 slots used).'})
     return jsonify({'pin': pin})
 
 # ─── CONTEXT PROCESSOR: LOW STOCK BADGE ──────────────────────────────────────
@@ -897,7 +897,7 @@ def add_column():
             conn = get_db()
             gpio_pin = get_next_gpio_pin(conn)
             if gpio_pin is None:
-                error = 'No GPIO pins available. Maximum of 10 columns supported with physical LEDs. Remove an existing column to free a pin.'
+                error = 'No GPIO pins available. Maximum of 22 columns supported with physical LEDs. Remove an existing column to free a pin.'
             else:
                 try:
                     conn.execute(
